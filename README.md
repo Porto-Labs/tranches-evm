@@ -2,7 +2,7 @@
 
 Fixed-rate senior/junior tranching mechanism for yield-bearing assets.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: BUSL-1.1](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](https://spdx.org/licenses/BUSL-1.1.html)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.23-blue)](https://soliditylang.org/)
 [![Hardhat](https://img.shields.io/badge/Built%20with-Hardhat-orange)](https://hardhat.org/)
 
@@ -12,7 +12,7 @@ Fixed-rate senior/junior tranching mechanism for yield-bearing assets.
 
 ## Overview
 
-Porto Tranches splits yield-bearing assets (SY) into senior (srSY) and junior (jrSY) tranches at a fixed ratio. Senior receives a fixed target return, junior receives the residual. At maturity, the contract finalizes redemption rates on-chain, enabling unilateral redemption.
+Porto Tranches splits yield-bearing assets (UA - Underlying Asset) into senior (srUA) and junior (jrUA) tranches at a fixed ratio. Senior receives a fixed target return, junior receives the residual. At maturity, the contract finalizes redemption rates on-chain, enabling unilateral redemption.
 
 For detailed mechanism specification, see our docs.
 
@@ -41,7 +41,7 @@ yarn compile
 yarn test
 
 # Run specific test file
-yarn test test/market/TrancheMarket.test.ts
+yarn test test/TrancheMarket.test.ts
 
 # Run with gas reporting
 REPORT_GAS=true yarn test
@@ -80,107 +80,18 @@ yarn format
 
 ---
 
-## Deployment
-
-### Deploy to Local Network
-
-```bash
-# Start local node
-yarn hardhat node
-
-# In another terminal, deploy
-yarn hardhat run scripts/deployCore.ts --network localhost
-```
-
-### Deploy to Testnet
-
-```bash
-# Configure .env with RPC URL and private key
-cp .env.example .env
-
-# Deploy to Sepolia
-yarn hardhat run scripts/deployCore.ts --network sepolia
-```
-
-### Deploy SY Adapter
-
-```bash
-yarn hardhat run scripts/deploySY4626.ts --network <network>
-```
-
-### Create Tranche Market
-
-```bash
-yarn hardhat run scripts/createMarket.ts --network <network>
-```
-
----
-
-## Hardhat Tasks
-
-### View Market Information
-
-```bash
-yarn hardhat market-info --market <address> --network <network>
-```
-
-### Finalize Market
-
-```bash
-yarn hardhat market-finalize --market <address> --network <network>
-```
-
-### List Available Tasks
-
-```bash
-yarn hardhat
-```
-
----
-
 ## Project Structure
 
 ```
 contracts/          # Solidity contracts
-  core/            # TrancheMarket, TrancheToken, Factory
-  interfaces/      # ISY, ITrancheMarket
+  core/            # TrancheMarket, TrancheToken
+  interfaces/      # ITrancheMarket
   libraries/       # Math and helper libraries
-  router/          # TrancheRouter
-  sy/              # SY adapters
+  errors/          # Error definitions
 
 test/              # Test files
-  market/          # Unit tests
-  router/          # Integration tests
-  invariants/      # Invariant tests
-
-scripts/           # Deployment scripts
-tasks/             # Hardhat tasks
 docs/              # Technical documentation
 ```
-
----
-
-## Configuration
-
-### Environment Variables
-
-Copy `.env.example` to `.env` and configure:
-
-```bash
-# RPC URLs
-MAINNET_RPC_URL=
-SEPOLIA_RPC_URL=
-
-# Private keys
-DEPLOYER_PRIVATE_KEY=
-
-# API keys
-ETHERSCAN_API_KEY=
-```
-
-### Network Configuration
-
-Edit `hardhat.config.ts` to add custom networks.
 
 ---
 
@@ -195,11 +106,3 @@ For security disclosures, contact: security@porto.finance
 ## License
 
 BUSL License - See [LICENSE](./LICENSE)
-
----
-
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
-
----

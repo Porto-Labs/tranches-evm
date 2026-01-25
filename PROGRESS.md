@@ -2,7 +2,7 @@
 
 **Repository:** /Users/kotashki/Documents/dev/porto/tranches-evm
 **Spec:** [docs/porto_tranching_layer.md](docs/porto_tranching_layer.md)
-**Last Updated:** 2026-01-22
+**Last Updated:** 2026-01-25
 
 ---
 
@@ -29,8 +29,9 @@ Building a tranching mechanism (UA → srUA + jrUA) for yield-bearing assets.
 | **TrancheMarket.sol** | ✅ Done (V1) | Admin-controlled finalization |
 | **ITrancheMarket.sol** | ✅ Done | Interface for V1 |
 | **Errors.sol** | ✅ Done | Centralized error definitions |
-| **PortoMath.sol** | ✅ Done | Minimal fixed-point math |
+| **PortoMath.sol** | ✅ Done | Fixed-point math (mulDown/Up, divDown/Up) |
 | **Spec Document** | ✅ Done | `docs/porto_tranching_layer.md` |
+| **SettlementRatioModel.sol** | ✅ Done | Waterfall logic library |
 
 ### V1 Implementation Summary
 
@@ -45,116 +46,66 @@ Current TrancheMarket implements:
 
 ## Remaining Work
 
-### Phase 1: Oracle-Based Settlement (Spec Compliance)
+### Phase 1: SettlementRatioModel
 
-The spec requires on-chain rate calculation via oracle, not admin-provided rates.
+**Status:** ✅ Complete
 
-| Task | Description | Status |
-|------|-------------|--------|
-| **1.1** | Add Chainlink `AggregatorV3Interface` | ⬚ Pending |
-| **1.2** | Create `MockChainlinkAggregator.sol` for testing | ⬚ Pending |
-| **1.3** | Implement `ISettlementRatioModel` interface | ⬚ Pending |
-| **1.4** | Implement `SettlementRatioModel.sol` (waterfall logic) | ⬚ Pending |
-| **1.5** | Add exponential math to PortoMath (`(1 + r)^t`) | ⬚ Pending |
-| **1.6** | Refactor `finalize(referencePrice, deviationThreshold)` | ⬚ Pending |
-| **1.7** | Add `previewSettlement()` function | ⬚ Pending |
-| **1.8** | Add new constructor params (priceFeed, settlementModel, APYs) | ⬚ Pending |
+Stateless library that calculates senior/junior redemption rates using waterfall logic:
+- Condition A (Surplus): Senior capped at target, junior gets excess
+- Condition B (Compression): Senior takes all yield, junior at principal
+- Condition C (Erosion): Senior protected at floor, junior eroded
 
-### Phase 2: Factory & Router
-
-| Task | Description | Status |
-|------|-------------|--------|
-| **2.1** | Implement `TrancheMarketFactory.sol` | ⬚ Pending |
-| **2.2** | Implement `TrancheRouter.sol` | ⬚ Pending |
-
-### Phase 3: Testing
-
-| Task | Description | Status |
-|------|-------------|--------|
-| **3.1** | Unit tests for TrancheMarket | ⬚ Pending |
-| **3.2** | Unit tests for SettlementRatioModel | ⬚ Pending |
-| **3.3** | Integration tests (E2E with mock oracle) | ⬚ Pending |
-| **3.4** | Edge case tests (all 3 waterfall conditions) | ⬚ Pending |
+**Files:**
+- `contracts/settlement/SettlementRatioModel.sol`
+- `test/settlement/SettlementRatioModel.test.ts` (27 tests)
 
 ---
 
-## Settlement Model (From Spec)
+### Phase 2: Oracle Integration
 
-### Waterfall Logic (Section 8.3)
+| Task | Description | Status |
+|------|-------------|--------|
+| **2.1** | Add Chainlink `AggregatorV3Interface` | ⬚ Pending |
+| **2.2** | Create `MockChainlinkAggregator.sol` for testing | ⬚ Pending |
+| **2.3** | Refactor `finalize(referencePrice, deviationThreshold)` | ⬚ Pending |
+| **2.4** | Add `previewSettlement()` function | ⬚ Pending |
+| **2.5** | Add new constructor params (priceFeed) | ⬚ Pending |
 
-```
-totalValueUsd = uaQuantity × oraclePrice
-seniorFloorValue = seniorPrincipal × (1 + floorApy)^t
-seniorTargetValue = seniorPrincipal × (1 + targetApy)^t
+### Phase 3: Factory & Router
 
-Condition A (Surplus): totalValueUsd >= seniorTargetValue + juniorPrincipal
-  → Senior: seniorTargetValue, Junior: residual
+| Task | Description | Status |
+|------|-------------|--------|
+| **3.1** | Implement `TrancheMarketFactory.sol` (Optional or maybe not needed for POC) | ⬚ Pending |
+| **3.2** | Implement `TrancheRouter.sol` (Optinal as for the POC it could be a simple Multicall contract) | ⬚ Pending |
 
-Condition B (Target Compression): seniorFloorValue + juniorPrincipal <= totalValueUsd < seniorTargetValue + juniorPrincipal
-  → Senior: totalValueUsd - juniorPrincipal, Junior: principal only
+### Phase 4: Integration Testing
 
-Condition C (Junior Erosion): totalValueUsd < seniorFloorValue + juniorPrincipal
-  → Senior: min(totalValueUsd, seniorFloorValue), Junior: residual (may be 0)
-```
-
-### New finalize() Signature
-
-```solidity
-function finalize(uint256 referencePrice, uint256 deviationThreshold) external;
-```
-
-- Multisig provides reference price + deviation threshold
-- On-chain oracle provides actual price
-- Reverts if `|oraclePrice - referencePrice| > deviationThreshold`
-- Rates calculated on-chain via SettlementRatioModel
-
----
-
-## File Structure (Target)
-
-```
-contracts/
-├── core/
-│   ├── TrancheMarket.sol          ✅ (needs Phase 1 updates)
-│   └── TrancheToken.sol           ✅
-├── interfaces/
-│   ├── ITrancheMarket.sol         ✅ (needs Phase 1 updates)
-│   ├── ISettlementRatioModel.sol  ⬚ NEW
-│   └── AggregatorV3Interface.sol  ⬚ NEW (Chainlink)
-├── settlement/
-│   └── SettlementRatioModel.sol   ⬚ NEW
-├── test/
-│   ├── ERC20Mock.sol              ✅
-│   └── MockChainlinkAggregator.sol ⬚ NEW
-├── libraries/
-│   └── math/PortoMath.sol         ✅ (may need exp math)
-├── errors/
-│   └── Errors.sol                 ✅ (needs new oracle errors)
-├── factory/
-│   └── TrancheMarketFactory.sol   ⬚ NEW
-└── router/
-    └── TrancheRouter.sol          ⬚ NEW
-```
+| Task | Description | Status |
+|------|-------------|--------|
+| **4.1** | Unit tests for TrancheMarket (updated) | ⬚ Pending |
+| **4.2** | Integration tests (E2E with mock oracle) | ⬚ Pending |
+| **4.3** | Edge case tests (all 3 waterfall conditions) | ⬚ Pending |
 
 ---
 
 ## Definition of Done
 
-The implementation is complete when:
+### Phase 1: SettlementRatioModel
+✅ `SettlementRatioModel.sol` with waterfall logic and unit tests
 
+### Full Implementation
 1. ✅ Deposit UA → srUA/jrUA at fixed ratio
 2. ✅ Pre-maturity recomposition works only in fixed ratio
 3. ⬚ `previewSettlement()` returns projected rates from current oracle price
 4. ⬚ After expiry, multisig calls `finalize(referencePrice, deviationThreshold)`
 5. ⬚ Finalize validates oracle price within threshold, calculates rates via SettlementRatioModel
 6. ✅ Post-maturity unilateral redemption works for both srUA and jrUA
-7. ⬚ Waterfall logic works correctly (Conditions A, B, C)
-8. ⬚ All tests pass with mock Chainlink oracle
+7. ⬚ All integration tests pass with mock Chainlink oracle
 
 ---
 
 ## Notes
 
 - Using yarn for package management
-- Solidity 0.8.23, Hardhat, TypeChain
+- Solidity 0.8.23, Hardhat, TypeChain, ethers v6
 - OpenZeppelin contracts for ERC20 base

@@ -32,6 +32,31 @@ library PortoMath {
     }
 
     /**
+     * @notice Multiply two WAD numbers, round UP
+     * @dev Equivalent to ceil((a * b) / 1e18)
+     * @param a First number (WAD precision)
+     * @param b Second number (WAD precision)
+     * @return result The result (WAD precision, rounded up)
+     */
+    function mulUp(uint256 a, uint256 b) internal pure returns (uint256) {
+        uint256 product = a * b;
+        if (product == 0) return 0;
+        return ((product - 1) / ONE) + 1;
+    }
+
+    /**
+     * @notice Divide WAD numbers, round UP
+     * @dev Equivalent to ceil((a * 1e18) / b)
+     * @param a Numerator (WAD precision)
+     * @param b Denominator (WAD precision)
+     * @return result The result (WAD precision, rounded up)
+     */
+    function divUp(uint256 a, uint256 b) internal pure returns (uint256) {
+        if (a == 0) return 0;
+        return ((a * ONE) - 1) / b + 1;
+    }
+
+    /**
      * @notice Returns the minimum of two numbers
      * @param a First number
      * @param b Second number

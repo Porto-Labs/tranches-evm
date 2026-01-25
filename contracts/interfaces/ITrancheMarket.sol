@@ -19,13 +19,7 @@ interface ITrancheMarket {
      * @param srOut Amount of senior tokens minted
      * @param jrOut Amount of junior tokens minted
      */
-    event Tokenize(
-        address indexed caller,
-        address indexed receiver,
-        uint256 uaIn,
-        uint256 srOut,
-        uint256 jrOut
-    );
+    event Tokenize(address indexed caller, address indexed receiver, uint256 uaIn, uint256 srOut, uint256 jrOut);
 
     /**
      * @notice Emitted when tranches are redeemed for UA before maturity
@@ -48,10 +42,7 @@ interface ITrancheMarket {
      * @param srRateUA Senior redemption rate (UA per srUA)
      * @param jrRateUA Junior redemption rate (UA per jrUA)
      */
-    event Finalize(
-        uint256 srRateUA,
-        uint256 jrRateUA
-    );
+    event Finalize(uint256 srRateUA, uint256 jrRateUA);
 
     /**
      * @notice Emitted when senior tokens are redeemed post-maturity
@@ -60,12 +51,7 @@ interface ITrancheMarket {
      * @param srIn Amount of senior tokens burned
      * @param uaOut Amount of UA returned
      */
-    event RedeemSenior(
-        address indexed caller,
-        address indexed receiver,
-        uint256 srIn,
-        uint256 uaOut
-    );
+    event RedeemSenior(address indexed caller, address indexed receiver, uint256 srIn, uint256 uaOut);
 
     /**
      * @notice Emitted when junior tokens are redeemed post-maturity
@@ -74,12 +60,7 @@ interface ITrancheMarket {
      * @param jrIn Amount of junior tokens burned
      * @param uaOut Amount of UA returned
      */
-    event RedeemJunior(
-        address indexed caller,
-        address indexed receiver,
-        uint256 jrIn,
-        uint256 uaOut
-    );
+    event RedeemJunior(address indexed caller, address indexed receiver, uint256 jrIn, uint256 uaOut);
 
     /**
      * @notice Emitted when the admin address is changed
@@ -98,9 +79,7 @@ interface ITrancheMarket {
      * @return srOut Amount of senior tokens minted
      * @return jrOut Amount of junior tokens minted
      */
-    function tokenize(uint256 uaIn, address receiver)
-        external
-        returns (uint256 srOut, uint256 jrOut);
+    function tokenize(uint256 uaIn, address receiver) external returns (uint256 srOut, uint256 jrOut);
 
     /**
      * @notice Redeem UA by burning both tranches in correct ratio (pre-maturity only)
@@ -111,9 +90,7 @@ interface ITrancheMarket {
      * @param receiver Address to receive UA
      * @return uaOut Amount of UA returned
      */
-    function redeemPreMaturity(uint256 srIn, uint256 jrIn, address receiver)
-        external
-        returns (uint256 uaOut);
+    function redeemPreMaturity(uint256 srIn, uint256 jrIn, address receiver) external returns (uint256 uaOut);
 
     /**
      * @notice Finalize redemption rates at maturity (admin-controlled, callable once after expiry)
@@ -132,9 +109,7 @@ interface ITrancheMarket {
      * @param receiver Address to receive UA
      * @return uaOut Amount of UA returned
      */
-    function redeemSenior(uint256 srIn, address receiver)
-        external
-        returns (uint256 uaOut);
+    function redeemSenior(uint256 srIn, address receiver) external returns (uint256 uaOut);
 
     /**
      * @notice Redeem junior tokens for UA (post-maturity only)
@@ -145,9 +120,7 @@ interface ITrancheMarket {
      * @param receiver Address to receive UA
      * @return uaOut Amount of UA returned
      */
-    function redeemJunior(uint256 jrIn, address receiver)
-        external
-        returns (uint256 uaOut);
+    function redeemJunior(uint256 jrIn, address receiver) external returns (uint256 uaOut);
 
     /**
      * @notice Change the admin address

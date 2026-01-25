@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "../interfaces/ITrancheMarket.sol";
-import "../core/TrancheToken.sol";
-import "../errors/Errors.sol";
-import "../libraries/math/PortoMath.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { ITrancheMarket } from "../interfaces/ITrancheMarket.sol";
+import { TrancheToken } from "./TrancheToken.sol";
+import { Errors } from "../errors/Errors.sol";
+import { PortoMath } from "../libraries/math/PortoMath.sol";
 
 /**
  * @title TrancheMarket
  * @notice Core tranching mechanism: UA → srUA (senior) + jrUA (junior)
- * @dev V1 implementation with admin-controlled finalization
+ * @dev Admin-controlled finalization
  *      Pre-maturity: Fixed ratio minting/redeeming
  *      At maturity: Admin sets redemption rates
  *      Post-maturity: Unilateral redemption at fixed rates
@@ -21,28 +21,30 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using PortoMath for uint256;
 
-    // ============ State Variables ============
-
-    /// @notice Admin address (can call finalize with rates)
-    address public admin;
+    // ============ Immutables ============
 
     /// @notice Underlying Asset token (internal - use ua() getter for external access)
-    IERC20 internal immutable uaToken;
+    IERC20 internal immutable _uaToken;
 
     /// @notice Senior tranche token (internal - use srToken() getter for external access)
-    TrancheToken internal immutable srTokenContract;
+    TrancheToken internal immutable _srTokenContract;
 
     /// @notice Junior tranche token (internal - use jrToken() getter for external access)
-    TrancheToken internal immutable jrTokenContract;
+    TrancheToken internal immutable _jrTokenContract;
 
     /// @notice Maturity timestamp
     uint256 public immutable expiry;
 
-    /// @notice Senior tranche ratio (WAD precision, e.g., 0.8e18 for 80%)
+    /// @notice Senior tranche ratio (e.g., 0.8e18 for 80%)
     uint256 public immutable seniorRatio;
 
-    /// @notice Junior tranche ratio (WAD precision, e.g., 0.2e18 for 20%)
+    /// @notice Junior tranche ratio (e.g., 0.2e18 for 20%)
     uint256 public immutable juniorRatio;
+
+    // ============ State Variables ============
+
+    /// @notice Admin address (can call finalize with rates)
+    address public admin;
 
     /// @notice Whether the market has been finalized
     bool public finalized;
@@ -69,8 +71,8 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @notice Creates a new TrancheMarket
      * @param _ua Underlying Asset token address
      * @param _expiry Maturity timestamp
-     * @param _seniorRatio Senior tranche ratio (WAD precision, e.g., 0.8e18 for 80%)
-     * @param _juniorRatio Junior tranche ratio (WAD precision, e.g., 0.2e18 for 20%)
+     * @param _seniorRatio Senior tranche ratio (e.g., 0.8e18 for 80%)
+     * @param _juniorRatio Junior tranche ratio (e.g., 0.2e18 for 20%)
      * @param _admin Admin address
      * @param _srName Senior token name
      * @param _srSymbol Senior token symbol
@@ -88,21 +90,18 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         string memory _jrName,
         string memory _jrSymbol
     ) {
-        // Validation
         if (_ua == address(0) || _admin == address(0)) revert Errors.ZeroAddress();
         if (_expiry <= block.timestamp) revert Errors.TrancheInvalidExpiry();
         if (_seniorRatio + _juniorRatio != 1e18) revert Errors.TrancheInvalidWeights();
 
-        // Set immutables
-        uaToken = IERC20(_ua);
+        _uaToken = IERC20(_ua);
         expiry = _expiry;
         seniorRatio = _seniorRatio;
         juniorRatio = _juniorRatio;
         admin = _admin;
 
-        // Deploy TrancheToken contracts
-        srTokenContract = new TrancheToken(_srName, _srSymbol, address(this));
-        jrTokenContract = new TrancheToken(_jrName, _jrSymbol, address(this));
+        _srTokenContract = new TrancheToken(_srName, _srSymbol, address(this));
+        _jrTokenContract = new TrancheToken(_jrName, _jrSymbol, address(this));
     }
 
     // ============ Pre-Maturity Functions ============
@@ -114,25 +113,18 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @return srOut Amount of senior tokens minted
      * @return jrOut Amount of junior tokens minted
      */
-    function tokenize(uint256 uaIn, address receiver)
-        external
-        nonReentrant
-        returns (uint256 srOut, uint256 jrOut)
-    {
+    function tokenize(uint256 uaIn, address receiver) external nonReentrant returns (uint256 srOut, uint256 jrOut) {
         if (block.timestamp >= expiry) revert Errors.TrancheMarketExpired();
         if (uaIn == 0) revert Errors.TrancheZeroAmount();
         if (receiver == address(0)) revert Errors.ZeroAddress();
 
-        // Transfer UA from caller
-        IERC20(address(uaToken)).safeTransferFrom(msg.sender, address(this), uaIn);
+        IERC20(address(_uaToken)).safeTransferFrom(msg.sender, address(this), uaIn);
 
-        // Calculate tranche amounts
         srOut = uaIn.mulDown(seniorRatio);
         jrOut = uaIn.mulDown(juniorRatio);
 
-        // Mint tranches
-        srTokenContract.mint(receiver, srOut);
-        jrTokenContract.mint(receiver, jrOut);
+        _srTokenContract.mint(receiver, srOut);
+        _jrTokenContract.mint(receiver, jrOut);
 
         emit Tokenize(msg.sender, receiver, uaIn, srOut, jrOut);
     }
@@ -144,11 +136,11 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @param receiver Address to receive UA
      * @return uaOut Amount of UA returned
      */
-    function redeemPreMaturity(uint256 srIn, uint256 jrIn, address receiver)
-        external
-        nonReentrant
-        returns (uint256 uaOut)
-    {
+    function redeemPreMaturity(
+        uint256 srIn,
+        uint256 jrIn,
+        address receiver
+    ) external nonReentrant returns (uint256 uaOut) {
         if (block.timestamp >= expiry) revert Errors.TrancheMarketExpired();
         if (srIn == 0 || jrIn == 0) revert Errors.TrancheZeroAmount();
         if (receiver == address(0)) revert Errors.ZeroAddress();
@@ -157,40 +149,33 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         // Equivalent: srIn * juniorRatio == jrIn * seniorRatio
         if (srIn.mulDown(juniorRatio) != jrIn.mulDown(seniorRatio)) revert Errors.TrancheRatioMismatch();
 
-        // Burn tranches from caller
-        srTokenContract.burn(msg.sender, srIn);
-        jrTokenContract.burn(msg.sender, jrIn);
+        _srTokenContract.burn(msg.sender, srIn);
+        _jrTokenContract.burn(msg.sender, jrIn);
 
-        // Calculate UA output
-        uaOut = srIn.divDown(seniorRatio);  // or jrIn.divDown(juniorRatio) - same result
+        uaOut = srIn.divDown(seniorRatio); // or jrIn.divDown(juniorRatio) - same result
 
-        // Transfer UA to receiver
-        IERC20(address(uaToken)).safeTransfer(receiver, uaOut);
+        IERC20(address(_uaToken)).safeTransfer(receiver, uaOut);
 
         emit RedeemPreMaturity(msg.sender, receiver, srIn, jrIn, uaOut);
     }
 
-    // ============ Finalization (V1 Simplified) ============
+    // ============ Finalization ============
 
     /**
      * @notice Finalize redemption rates at maturity (admin-controlled)
      * @dev Admin provides rates, contract validates total <= available UA
      *      Can only be called once, after expiry
-     * @param _srRateUA Senior redemption rate (UA per srUA, WAD precision)
-     * @param _jrRateUA Junior redemption rate (UA per jrUA, WAD precision)
+     * @param _srRateUA Senior redemption rate (UA per srUA)
+     * @param _jrRateUA Junior redemption rate (UA per jrUA)
      */
-    function finalize(uint256 _srRateUA, uint256 _jrRateUA)
-        external
-        onlyAdmin
-        nonReentrant
-    {
+    function finalize(uint256 _srRateUA, uint256 _jrRateUA) external onlyAdmin nonReentrant {
         if (block.timestamp < expiry) revert Errors.TrancheMarketNotExpired();
         if (finalized) revert Errors.TrancheMarketAlreadyFinalized();
 
         // Validation: total redemption doesn't exceed available UA
-        uint256 uaBal = IERC20(address(uaToken)).balanceOf(address(this));
-        uint256 srSupply = srTokenContract.totalSupply();
-        uint256 jrSupply = jrTokenContract.totalSupply();
+        uint256 uaBal = IERC20(address(_uaToken)).balanceOf(address(this));
+        uint256 srSupply = _srTokenContract.totalSupply();
+        uint256 jrSupply = _jrTokenContract.totalSupply();
 
         uint256 totalRedemption = srSupply.mulDown(_srRateUA) + jrSupply.mulDown(_jrRateUA);
         if (totalRedemption > uaBal) revert Errors.TotalRedemptionExceedsBalance();
@@ -210,23 +195,14 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @param receiver Address to receive UA
      * @return uaOut Amount of UA returned
      */
-    function redeemSenior(uint256 srIn, address receiver)
-        external
-        nonReentrant
-        returns (uint256 uaOut)
-    {
+    function redeemSenior(uint256 srIn, address receiver) external nonReentrant returns (uint256 uaOut) {
         if (!finalized) revert Errors.TrancheMarketNotFinalized();
         if (srIn == 0) revert Errors.TrancheZeroAmount();
         if (receiver == address(0)) revert Errors.ZeroAddress();
 
-        // Burn senior tokens from caller
-        srTokenContract.burn(msg.sender, srIn);
-
-        // Calculate UA output
+        _srTokenContract.burn(msg.sender, srIn);
         uaOut = srIn.mulDown(srRateUA);
-
-        // Transfer UA to receiver
-        IERC20(address(uaToken)).safeTransfer(receiver, uaOut);
+        IERC20(address(_uaToken)).safeTransfer(receiver, uaOut);
 
         emit RedeemSenior(msg.sender, receiver, srIn, uaOut);
     }
@@ -237,24 +213,16 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @param receiver Address to receive UA
      * @return uaOut Amount of UA returned (may be 0 if jrRateUA is 0)
      */
-    function redeemJunior(uint256 jrIn, address receiver)
-        external
-        nonReentrant
-        returns (uint256 uaOut)
-    {
+    function redeemJunior(uint256 jrIn, address receiver) external nonReentrant returns (uint256 uaOut) {
         if (!finalized) revert Errors.TrancheMarketNotFinalized();
         if (jrIn == 0) revert Errors.TrancheZeroAmount();
         if (receiver == address(0)) revert Errors.ZeroAddress();
 
-        // Burn junior tokens from caller
-        jrTokenContract.burn(msg.sender, jrIn);
-
-        // Calculate UA output (may be 0 if jrRateUA is 0)
+        _jrTokenContract.burn(msg.sender, jrIn);
         uaOut = jrIn.mulDown(jrRateUA);
 
-        // Transfer UA to receiver (if uaOut > 0)
         if (uaOut > 0) {
-            IERC20(address(uaToken)).safeTransfer(receiver, uaOut);
+            IERC20(address(_uaToken)).safeTransfer(receiver, uaOut);
         }
 
         emit RedeemJunior(msg.sender, receiver, jrIn, uaOut);
@@ -276,16 +244,16 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
 
     /// @notice Returns the Underlying Asset token address
     function ua() external view returns (address) {
-        return address(uaToken);
+        return address(_uaToken);
     }
 
     /// @notice Returns the senior tranche token address
     function srToken() external view returns (address) {
-        return address(srTokenContract);
+        return address(_srTokenContract);
     }
 
     /// @notice Returns the junior tranche token address
     function jrToken() external view returns (address) {
-        return address(jrTokenContract);
+        return address(_jrTokenContract);
     }
 }

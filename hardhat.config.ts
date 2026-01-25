@@ -1,6 +1,6 @@
 import '@nomicfoundation/hardhat-chai-matchers';
-import '@nomiclabs/hardhat-ethers';
-import '@nomiclabs/hardhat-etherscan';
+import '@nomicfoundation/hardhat-ethers';
+import '@nomicfoundation/hardhat-verify';
 import '@typechain/hardhat';
 import 'hardhat-gas-reporter';
 import 'solidity-coverage';
@@ -30,7 +30,7 @@ const config: HardhatUserConfig = {
     },
     typechain: {
         outDir: 'typechain-types',
-        target: 'ethers-v5',
+        target: 'ethers-v6',
     },
     contractSizer: {
         disambiguatePaths: false,

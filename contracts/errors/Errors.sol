@@ -48,6 +48,20 @@ library Errors {
     /// @notice Thrown when weight sum doesn't equal ONE or weights are zero
     error TrancheInvalidWeights();
 
+    // ============ Settlement Errors ============
+
+    /// @notice Thrown when settlement price is zero
+    error SettlementZeroPrice();
+
+    /// @notice Thrown when settlement quantity is zero
+    error SettlementZeroQuantity();
+
+    /// @notice Thrown when settlement ratio is invalid
+    error SettlementInvalidRatio();
+
+    /// @notice Thrown when yield range is invalid
+    error SettlementInvalidYieldRange();
+
     // ============ General Errors ============
 
     /// @notice Thrown when a zero address is provided where not allowed

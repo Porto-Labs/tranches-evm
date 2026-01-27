@@ -13,6 +13,9 @@ contract TrancheToken is ERC20 {
     /// @notice The TrancheMarket contract that owns this token
     address public immutable market;
 
+    /// @notice Token decimals (should match UA decimals)
+    uint8 private immutable _decimals;
+
     /**
      * @notice Restricts function access to the market contract only
      */
@@ -26,10 +29,19 @@ contract TrancheToken is ERC20 {
      * @param _name Token name (e.g., "Porto Senior Tranche UA")
      * @param _symbol Token symbol (e.g., "Porto Senior UA")
      * @param _market Address of the TrancheMarket contract
+     * @param decimals_ Token decimals
      */
-    constructor(string memory _name, string memory _symbol, address _market) ERC20(_name, _symbol) {
+    constructor(string memory _name, string memory _symbol, address _market, uint8 decimals_) ERC20(_name, _symbol) {
         if (_market == address(0)) revert Errors.ZeroAddress();
         market = _market;
+        _decimals = decimals_;
+    }
+
+    /**
+     * @notice Returns the number of decimals
+     */
+    function decimals() public view override returns (uint8) {
+        return _decimals;
     }
 
     /**

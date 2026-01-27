@@ -160,4 +160,14 @@ interface ITrancheMarket {
 
     /// @notice Returns the admin address
     function admin() external view returns (address);
+
+    /// @notice Returns swap parameters for Router in a single call
+    /// @return uaAddress Underlying Asset token address
+    /// @return srAddress Senior tranche token address
+    /// @return jrAddress Junior tranche token address
+    /// @return fee Uniswap V3 pool fee tier
+    function getSwapParameters()
+        external
+        view
+        returns (address uaAddress, address srAddress, address jrAddress, uint24 fee);
 }

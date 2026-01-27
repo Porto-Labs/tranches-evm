@@ -55,6 +55,9 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     /// @notice Junior redemption rate (UA per jrUA, set at finalization)
     uint256 public jrRateUA;
 
+    /// @notice Uniswap V3 pool fee tier for Router swaps (e.g., 3000 = 0.3%)
+    uint24 public poolFee;
+
     // ============ Modifiers ============
 
     /**
@@ -74,6 +77,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @param _seniorRatio Senior tranche ratio (e.g., 0.8e18 for 80%)
      * @param _juniorRatio Junior tranche ratio (e.g., 0.2e18 for 20%)
      * @param _admin Admin address
+     * @param _poolFee Uniswap V3 pool fee tier (e.g., 3000 for 0.3%)
      * @param _srName Senior token name
      * @param _srSymbol Senior token symbol
      * @param _jrName Junior token name
@@ -85,6 +89,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         uint256 _seniorRatio,
         uint256 _juniorRatio,
         address _admin,
+        uint24 _poolFee,
         string memory _srName,
         string memory _srSymbol,
         string memory _jrName,
@@ -99,6 +104,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         seniorRatio = _seniorRatio;
         juniorRatio = _juniorRatio;
         admin = _admin;
+        poolFee = _poolFee;
 
         _srTokenContract = new TrancheToken(_srName, _srSymbol, address(this));
         _jrTokenContract = new TrancheToken(_jrName, _jrSymbol, address(this));
@@ -200,7 +206,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         if (srIn == 0) revert Errors.TrancheZeroAmount();
         if (receiver == address(0)) revert Errors.ZeroAddress();
 
-        _srTokenContract.burn(msg.sender, srIn);
+        _srTokenContract.burn(msg.sender, srIn);   
         uaOut = srIn.mulDown(srRateUA);
         IERC20(address(_uaToken)).safeTransfer(receiver, uaOut);
 
@@ -255,5 +261,18 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     /// @notice Returns the junior tranche token address
     function jrToken() external view returns (address) {
         return address(_jrTokenContract);
+    }
+
+    /// @notice Returns swap parameters for Router in a single call
+    /// @return uaAddress Underlying Asset token address
+    /// @return srAddress Senior tranche token address
+    /// @return jrAddress Junior tranche token address
+    /// @return fee Uniswap V3 pool fee tier
+    function getSwapParameters()
+        external
+        view
+        returns (address uaAddress, address srAddress, address jrAddress, uint24 fee)
+    {
+        return (address(_uaToken), address(_srTokenContract), address(_jrTokenContract), poolFee);
     }
 }

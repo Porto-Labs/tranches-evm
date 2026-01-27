@@ -2,7 +2,7 @@
 
 **Repository:** /Users/kotashki/Documents/dev/porto/tranches-evm
 **Spec:** [docs/porto_tranching_layer.md](docs/porto_tranching_layer.md)
-**Last Updated:** 2026-01-25
+**Last Updated:** 2026-01-26
 
 ---
 
@@ -26,21 +26,29 @@ Building a tranching mechanism (UA → srUA + jrUA) for yield-bearing assets.
 | Component | Status | Notes |
 |-----------|--------|-------|
 | **TrancheToken.sol** | ✅ Done | Minimal ERC20 with market-only mint/burn |
-| **TrancheMarket.sol** | ✅ Done (V1) | Admin-controlled finalization |
-| **ITrancheMarket.sol** | ✅ Done | Interface for V1 |
-| **Errors.sol** | ✅ Done | Centralized error definitions |
+| **TrancheMarket.sol** | ✅ Done (V2) | Oracle-integrated finalization |
+| **ITrancheMarket.sol** | ✅ Done | Interface with oracle support |
+| **Errors.sol** | ✅ Done | Centralized error definitions (incl. oracle errors) |
 | **PortoMath.sol** | ✅ Done | Fixed-point math (mulDown/Up, divDown/Up) |
 | **Spec Document** | ✅ Done | `docs/porto_tranching_layer.md` |
 | **SettlementRatioModel.sol** | ✅ Done | Waterfall logic library |
+| **MockChainlinkAggregator.sol** | ✅ Done | Test mock for Chainlink oracle |
 
-### V1 Implementation Summary
+### V2 Implementation Summary
 
 Current TrancheMarket implements:
 - `tokenize(uaIn, receiver)` - deposit UA, mint srUA + jrUA at fixed ratio
 - `redeemPreMaturity(srIn, jrIn, receiver)` - redeem UA by burning both tranches in ratio
-- `finalize(srRateUA, jrRateUA)` - admin sets redemption rates post-expiry
+- `finalize(referencePrice, deviationThreshold)` - oracle-based finalization with deviation check
+- `previewSettlement()` - preview rates based on current oracle price
 - `redeemSenior(srIn, receiver)` - redeem senior post-finalization
 - `redeemJunior(jrIn, receiver)` - redeem junior post-finalization
+
+**Oracle Features:**
+- Chainlink AggregatorV3Interface integration
+- Automatic decimal conversion (supports 6, 8, 18 decimal oracles)
+- 24-hour staleness validation
+- Deviation threshold for reference price validation
 
 ---
 
@@ -63,13 +71,23 @@ Stateless library that calculates senior/junior redemption rates using waterfall
 
 ### Phase 2: Oracle Integration
 
-| Task | Description | Status |
-|------|-------------|--------|
-| **2.1** | Add Chainlink `AggregatorV3Interface` | ⬚ Pending |
-| **2.2** | Create `MockChainlinkAggregator.sol` for testing | ⬚ Pending |
-| **2.3** | Refactor `finalize(referencePrice, deviationThreshold)` | ⬚ Pending |
-| **2.4** | Add `previewSettlement()` function | ⬚ Pending |
-| **2.5** | Add new constructor params (priceFeed) | ⬚ Pending |
+**Status:** ✅ Complete
+
+Chainlink oracle integration for automated settlement rate calculation using waterfall logic.
+
+**Files:**
+- `contracts/core/TrancheMarket.sol` (updated with oracle support)
+- `contracts/interfaces/ITrancheMarket.sol` (updated interface)
+- `contracts/errors/Errors.sol` (oracle error definitions)
+- `contracts/test/MockChainlinkAggregator.sol` (test mock)
+- `test/core/TrancheMarket.test.ts` (33 tests)
+
+**Features:**
+- `finalize(referencePrice, deviationThreshold)` - uses oracle price, validates deviation
+- `previewSettlement()` - preview rates from current oracle price
+- Decimal scaling for any oracle precision (6, 8, 18 decimals)
+- 24-hour staleness check
+- Constructor uses `MarketParams` struct for cleaner initialization
 
 ### Phase 3: Factory & Router
 
@@ -80,11 +98,21 @@ Stateless library that calculates senior/junior redemption rates using waterfall
 
 ### Phase 4: Integration Testing
 
+**Status:** ✅ Complete (merged with Phase 2)
+
 | Task | Description | Status |
 |------|-------------|--------|
-| **4.1** | Unit tests for TrancheMarket (updated) | ⬚ Pending |
-| **4.2** | Integration tests (E2E with mock oracle) | ⬚ Pending |
-| **4.3** | Edge case tests (all 3 waterfall conditions) | ⬚ Pending |
+| **4.1** | Unit tests for TrancheMarket (updated) | ✅ Done |
+| **4.2** | Integration tests (E2E with mock oracle) | ✅ Done |
+| **4.3** | Edge case tests (all 3 waterfall conditions) | ✅ Done |
+
+**Test Coverage:**
+- Constructor validation (oracle address, initial price, yield range)
+- Oracle decimal conversion (6, 8, 18 decimals)
+- Staleness validation (24h threshold)
+- Deviation threshold enforcement
+- All 3 waterfall conditions (Surplus, Compression, Erosion)
+- No over-distribution invariant across various prices
 
 ---
 
@@ -96,11 +124,11 @@ Stateless library that calculates senior/junior redemption rates using waterfall
 ### Full Implementation
 1. ✅ Deposit UA → srUA/jrUA at fixed ratio
 2. ✅ Pre-maturity recomposition works only in fixed ratio
-3. ⬚ `previewSettlement()` returns projected rates from current oracle price
-4. ⬚ After expiry, multisig calls `finalize(referencePrice, deviationThreshold)`
-5. ⬚ Finalize validates oracle price within threshold, calculates rates via SettlementRatioModel
+3. ✅ `previewSettlement()` returns projected rates from current oracle price
+4. ✅ After expiry, multisig calls `finalize(referencePrice, deviationThreshold)`
+5. ✅ Finalize validates oracle price within threshold, calculates rates via SettlementRatioModel
 6. ✅ Post-maturity unilateral redemption works for both srUA and jrUA
-7. ⬚ All integration tests pass with mock Chainlink oracle
+7. ✅ All integration tests pass with mock Chainlink oracle (60 total tests)
 
 ---
 
@@ -109,3 +137,4 @@ Stateless library that calculates senior/junior redemption rates using waterfall
 - Using yarn for package management
 - Solidity 0.8.23, Hardhat, TypeChain, ethers v6
 - OpenZeppelin contracts for ERC20 base
+- Chainlink contracts for oracle integration (@chainlink/contracts ^1.3.0)

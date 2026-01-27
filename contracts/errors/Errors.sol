@@ -62,6 +62,20 @@ library Errors {
     /// @notice Thrown when yield range is invalid
     error SettlementInvalidYieldRange();
 
+    // ============ Oracle Errors ============
+
+    /// @notice Thrown when oracle returns invalid (zero or negative) price
+    error OracleInvalidPrice();
+
+    /// @notice Thrown when oracle price data is stale
+    error OracleStalePrice();
+
+    /// @notice Thrown when oracle price deviates too much from reference price
+    error OraclePriceDeviationExceeded();
+
+    /// @notice Thrown when deviation threshold is invalid (> 100%)
+    error OracleInvalidDeviationThreshold();
+
     // ============ General Errors ============
 
     /// @notice Thrown when a zero address is provided where not allowed

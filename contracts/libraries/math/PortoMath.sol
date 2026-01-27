@@ -65,14 +65,4 @@ library PortoMath {
     function min(uint256 a, uint256 b) internal pure returns (uint256) {
         return a < b ? a : b;
     }
-
-    /**
-     * @notice Returns the maximum of two numbers
-     * @param a First number
-     * @param b Second number
-     * @return result The maximum value
-     */
-    function max(uint256 a, uint256 b) internal pure returns (uint256) {
-        return a > b ? a : b;
-    }
 }

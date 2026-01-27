@@ -38,11 +38,13 @@ interface ITrancheMarket {
     );
 
     /**
-     * @notice Emitted when the market is finalized with admin-provided rates
+     * @notice Emitted when the market is finalized with oracle-calculated rates
+     * @param oraclePrice Price from Chainlink oracle at finalization
+     * @param referencePrice Reference price provided by admin for deviation check
      * @param srRateUA Senior redemption rate (UA per srUA)
      * @param jrRateUA Junior redemption rate (UA per jrUA)
      */
-    event Finalize(uint256 srRateUA, uint256 jrRateUA);
+    event Finalize(uint256 oraclePrice, uint256 referencePrice, uint256 srRateUA, uint256 jrRateUA);
 
     /**
      * @notice Emitted when senior tokens are redeemed post-maturity
@@ -93,13 +95,13 @@ interface ITrancheMarket {
     function redeemPreMaturity(uint256 srIn, uint256 jrIn, address receiver) external returns (uint256 uaOut);
 
     /**
-     * @notice Finalize redemption rates at maturity (admin-controlled, callable once after expiry)
-     * @dev Admin provides redemption rates as parameters
-     *      Contract validates total redemption doesn't exceed available UA
-     * @param _srRateUA Senior redemption rate (UA per srUA, WAD precision)
-     * @param _jrRateUA Junior redemption rate (UA per jrUA, WAD precision)
+     * @notice Finalize redemption rates at maturity using oracle price
+     * @dev Admin provides reference price for deviation check, oracle price is fetched on-chain
+     *      Contract calculates rates using SettlementRatioModel waterfall logic
+     * @param referencePrice Expected price for deviation validation (WAD precision)
+     * @param deviationThreshold Maximum allowed deviation from oracle price (WAD precision, e.g., 0.01e18 = 1%)
      */
-    function finalize(uint256 _srRateUA, uint256 _jrRateUA) external;
+    function finalize(uint256 referencePrice, uint256 deviationThreshold) external;
 
     /**
      * @notice Redeem senior tokens for UA (post-maturity only)
@@ -160,4 +162,26 @@ interface ITrancheMarket {
 
     /// @notice Returns the admin address
     function admin() external view returns (address);
+
+    /// @notice Returns the Chainlink price feed address
+    function priceFeed() external view returns (address);
+
+    /// @notice Returns the initial UA price at market creation (WAD precision)
+    function initialPrice() external view returns (uint256);
+
+    /// @notice Returns the senior floor yield (WAD precision, e.g., 0.0033e18 = 0.33%)
+    function seniorFloor() external view returns (uint256);
+
+    /// @notice Returns the senior target yield (WAD precision, e.g., 0.005e18 = 0.5%)
+    function seniorTarget() external view returns (uint256);
+
+    /**
+     * @notice Preview settlement rates based on current oracle price
+     * @dev Read-only function that calculates what rates would be at finalization
+     *      Uses current oracle price and SettlementRatioModel waterfall logic
+     * @return srRateUA Projected senior redemption rate (UA per srUA)
+     * @return jrRateUA Projected junior redemption rate (UA per jrUA)
+     * @return oraclePrice Current price from oracle (WAD precision)
+     */
+    function previewSettlement() external view returns (uint256 srRateUA, uint256 jrRateUA, uint256 oraclePrice);
 }

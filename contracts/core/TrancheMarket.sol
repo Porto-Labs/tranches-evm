@@ -3,11 +3,14 @@ pragma solidity ^0.8.23;
 
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { AggregatorV3Interface } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import { ITrancheMarket } from "../interfaces/ITrancheMarket.sol";
 import { TrancheToken } from "./TrancheToken.sol";
 import { Errors } from "../errors/Errors.sol";
 import { PortoMath } from "../libraries/math/PortoMath.sol";
+import { SettlementRatioModel } from "../settlement/SettlementRatioModel.sol";
 
 /**
  * @title TrancheMarket
@@ -20,6 +23,22 @@ import { PortoMath } from "../libraries/math/PortoMath.sol";
 contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using PortoMath for uint256;
+
+    // ============ Structs ============
+
+    /**
+     * @notice Constructor parameters for TrancheMarket
+     * @dev Used to avoid stack too deep errors
+     */
+    struct MarketParams {
+        address ua;
+        uint256 expiry;
+        uint256 seniorRatio;
+        address admin;
+        address priceFeed;
+        uint256 seniorFloor;
+        uint256 seniorTarget;
+    }
 
     // ============ Immutables ============
 
@@ -40,6 +59,32 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
 
     /// @notice Junior tranche ratio (e.g., 0.2e18 for 20%)
     uint256 public immutable juniorRatio;
+
+    /// @notice Chainlink price feed for UA (internal - use priceFeed() getter for external access)
+    AggregatorV3Interface internal immutable _priceFeed;
+
+    /// @notice Initial UA price at market creation (1e18 precision)
+    uint256 public immutable initialPrice;
+
+    /// @notice Senior floor yield for the period (1e18 precision, e.g., 0.0033e18 = 0.33%)
+    uint256 public immutable seniorFloor;
+
+    /// @notice Senior target yield for the period (1e18 precision, e.g., 0.005e18 = 0.5%)
+    uint256 public immutable seniorTarget;
+
+    /// @notice Price feed decimals (cached for gas efficiency)
+    uint8 private immutable _priceFeedDecimals;
+
+    // ============ Constants ============
+
+    /// @notice Staleness threshold for oracle data (24 hours)
+    uint256 private constant STALENESS_THRESHOLD = 24 hours;
+
+    /// @notice protocol default decimal precision (18 decimals)
+    uint8 private constant PROTOCOL_DEFAULT_DECIMALS = 18;
+
+    /// @notice one in PROTOCOL_DEFAULT_DECIMALS precision (1e18)
+    uint256 private constant ONE = 1e18;
 
     // ============ State Variables ============
 
@@ -69,39 +114,35 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
 
     /**
      * @notice Creates a new TrancheMarket
-     * @param _ua Underlying Asset token address
-     * @param _expiry Maturity timestamp
-     * @param _seniorRatio Senior tranche ratio (e.g., 0.8e18 for 80%)
-     * @param _juniorRatio Junior tranche ratio (e.g., 0.2e18 for 20%)
-     * @param _admin Admin address
-     * @param _srName Senior token name
-     * @param _srSymbol Senior token symbol
-     * @param _jrName Junior token name
-     * @param _jrSymbol Junior token symbol
+     * @param params Market initialization parameters
      */
-    constructor(
-        address _ua,
-        uint256 _expiry,
-        uint256 _seniorRatio,
-        uint256 _juniorRatio,
-        address _admin,
-        string memory _srName,
-        string memory _srSymbol,
-        string memory _jrName,
-        string memory _jrSymbol
-    ) {
-        if (_ua == address(0) || _admin == address(0)) revert Errors.ZeroAddress();
-        if (_expiry <= block.timestamp) revert Errors.TrancheInvalidExpiry();
-        if (_seniorRatio + _juniorRatio != 1e18) revert Errors.TrancheInvalidWeights();
+    constructor(MarketParams memory params) {
+        if (params.ua == address(0) || params.admin == address(0)) revert Errors.ZeroAddress();
+        if (params.priceFeed == address(0)) revert Errors.ZeroAddress();
+        if (params.expiry <= block.timestamp) revert Errors.TrancheInvalidExpiry();
+        if (params.seniorRatio == 0 || params.seniorRatio >= ONE) revert Errors.TrancheInvalidWeights();
+        if (params.seniorFloor > params.seniorTarget) revert Errors.SettlementInvalidYieldRange();
 
-        _uaToken = IERC20(_ua);
-        expiry = _expiry;
-        seniorRatio = _seniorRatio;
-        juniorRatio = _juniorRatio;
-        admin = _admin;
+        _uaToken = IERC20(params.ua);
+        expiry = params.expiry;
+        seniorRatio = params.seniorRatio;
+        juniorRatio = ONE - params.seniorRatio;
+        admin = params.admin;
 
-        _srTokenContract = new TrancheToken(_srName, _srSymbol, address(this));
-        _jrTokenContract = new TrancheToken(_jrName, _jrSymbol, address(this));
+        _priceFeed = AggregatorV3Interface(params.priceFeed);
+        _priceFeedDecimals = AggregatorV3Interface(params.priceFeed).decimals();
+        initialPrice = _getOraclePrice();
+        seniorFloor = params.seniorFloor;
+        seniorTarget = params.seniorTarget;
+
+        string memory uaSymbol = IERC20Metadata(params.ua).symbol();
+        string memory srSymbol = string(abi.encodePacked("sr", uaSymbol));
+        string memory jrSymbol = string(abi.encodePacked("jr", uaSymbol));
+        string memory srName = string(abi.encodePacked("Porto ", srSymbol));
+        string memory jrName = string(abi.encodePacked("Porto ", jrSymbol));
+
+        _srTokenContract = new TrancheToken(srName, srSymbol, address(this));
+        _jrTokenContract = new TrancheToken(jrName, jrSymbol, address(this));
     }
 
     // ============ Pre-Maturity Functions ============
@@ -162,29 +203,48 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     // ============ Finalization ============
 
     /**
-     * @notice Finalize redemption rates at maturity (admin-controlled)
-     * @dev Admin provides rates, contract validates total <= available UA
-     *      Can only be called once, after expiry
-     * @param _srRateUA Senior redemption rate (UA per srUA)
-     * @param _jrRateUA Junior redemption rate (UA per jrUA)
+     * @notice Finalize redemption rates at maturity using oracle price
+     * @dev Admin provides reference price for deviation check, oracle price is fetched on-chain
+     *      Contract calculates rates using SettlementRatioModel waterfall logic
+     * @param referencePrice Expected price for deviation validation (PROTOCOL_DEFAULT_DECIMALS precision)
+     * @param deviationThreshold Maximum allowed deviation from oracle price (1e18 precision, e.g., 0.01e18 = 1%)
      */
-    function finalize(uint256 _srRateUA, uint256 _jrRateUA) external onlyAdmin nonReentrant {
+    function finalize(uint256 referencePrice, uint256 deviationThreshold) external onlyAdmin nonReentrant {
         if (block.timestamp < expiry) revert Errors.TrancheMarketNotExpired();
         if (finalized) revert Errors.TrancheMarketAlreadyFinalized();
+        if (deviationThreshold > 1e18) revert Errors.OracleInvalidDeviationThreshold();
+        if (referencePrice == 0) revert Errors.SettlementZeroPrice();
 
-        // Validation: total redemption doesn't exceed available UA
-        uint256 uaBal = IERC20(address(_uaToken)).balanceOf(address(this));
-        uint256 srSupply = _srTokenContract.totalSupply();
-        uint256 jrSupply = _jrTokenContract.totalSupply();
+        // Fetch and validate oracle price
+        uint256 oraclePrice = _getOraclePrice();
 
-        uint256 totalRedemption = srSupply.mulDown(_srRateUA) + jrSupply.mulDown(_jrRateUA);
-        if (totalRedemption > uaBal) revert Errors.TotalRedemptionExceedsBalance();
+        // Validate deviation: |oracle - reference| / reference <= threshold
+        uint256 deviation;
+        if (oraclePrice >= referencePrice) {
+            deviation = (oraclePrice - referencePrice).divDown(referencePrice);
+        } else {
+            deviation = (referencePrice - oraclePrice).divDown(referencePrice);
+        }
+        if (deviation > deviationThreshold) revert Errors.OraclePriceDeviationExceeded();
 
-        srRateUA = _srRateUA;
-        jrRateUA = _jrRateUA;
+        // Calculate settlement rates using SettlementRatioModel
+        uint256 uaQuantity = IERC20(address(_uaToken)).balanceOf(address(this));
+        SettlementRatioModel.SettlementParams memory params = SettlementRatioModel.SettlementParams({
+            uaQuantity: uaQuantity,
+            initialPrice: initialPrice,
+            maturityPrice: oraclePrice,
+            seniorRatio: seniorRatio,
+            seniorFloor: seniorFloor,
+            seniorTarget: seniorTarget
+        });
+
+        SettlementRatioModel.SettlementResult memory result = SettlementRatioModel.calculateSettlement(params);
+
+        srRateUA = result.srRateUA;
+        jrRateUA = result.jrRateUA;
         finalized = true;
 
-        emit Finalize(_srRateUA, _jrRateUA);
+        emit Finalize(oraclePrice, referencePrice, result.srRateUA, result.jrRateUA);
     }
 
     // ============ Post-Maturity Functions ============
@@ -240,6 +300,71 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         emit AdminChanged(_newAdmin);
     }
 
+    // ============ Preview Functions ============
+
+    /**
+     * @notice Preview settlement rates based on current oracle price
+     * @dev Read-only function that calculates what rates would be at finalization
+     *      Uses current oracle price and SettlementRatioModel waterfall logic
+     * @return _srRateUA Projected senior redemption rate (UA per srUA)
+     * @return _jrRateUA Projected junior redemption rate (UA per jrUA)
+     * @return oraclePrice Current price from oracle (1e18 precision)
+     */
+    function previewSettlement() external view returns (uint256 _srRateUA, uint256 _jrRateUA, uint256 oraclePrice) {
+        oraclePrice = _getOraclePrice();
+        uint256 uaQuantity = IERC20(address(_uaToken)).balanceOf(address(this));
+
+        SettlementRatioModel.SettlementParams memory params = SettlementRatioModel.SettlementParams({
+            uaQuantity: uaQuantity,
+            initialPrice: initialPrice,
+            maturityPrice: oraclePrice,
+            seniorRatio: seniorRatio,
+            seniorFloor: seniorFloor,
+            seniorTarget: seniorTarget
+        });
+
+        SettlementRatioModel.SettlementResult memory result = SettlementRatioModel.calculateSettlement(params);
+        _srRateUA = result.srRateUA;
+        _jrRateUA = result.jrRateUA;
+    }
+
+    // ============ Internal Functions ============
+
+    /**
+     * @notice Scale price from oracle decimals to target decimals
+     * @dev Uses Chainlink's recommended pattern for decimal conversion
+     * @param _price Raw price from oracle
+     * @param _priceDecimals Oracle's decimal precision
+     * @param _targetDecimals Target decimal precision (PROTOCOL_DEFAULT_DECIMALS = 18)
+     * @return Scaled price in target decimals
+     */
+    function _scalePrice(int256 _price, uint8 _priceDecimals, uint8 _targetDecimals) internal pure returns (uint256) {
+        if (_priceDecimals < _targetDecimals) {
+            return uint256(_price) * 10 ** uint256(_targetDecimals - _priceDecimals);
+        } else if (_priceDecimals > _targetDecimals) {
+            return uint256(_price) / 10 ** uint256(_priceDecimals - _targetDecimals);
+        }
+        return uint256(_price);
+    }
+
+    /**
+     * @notice Fetch and validate oracle price
+     * @dev Validates: price > 0, data not stale (24h threshold)
+     * @return price Oracle price scaled to 1e18 precision
+     */
+    function _getOraclePrice() internal view returns (uint256 price) {
+        (, int256 answer, , uint256 updatedAt, ) = _priceFeed.latestRoundData();
+
+        // Validate price is positive
+        if (answer <= 0) revert Errors.OracleInvalidPrice();
+
+        // Validate data is not stale
+        if (block.timestamp - updatedAt > STALENESS_THRESHOLD) revert Errors.OracleStalePrice();
+
+        // Scale to 1e18 precision
+        price = _scalePrice(answer, _priceFeedDecimals, PROTOCOL_DEFAULT_DECIMALS);
+    }
+
     // ============ View Functions ============
 
     /// @notice Returns the Underlying Asset token address
@@ -255,5 +380,10 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     /// @notice Returns the junior tranche token address
     function jrToken() external view returns (address) {
         return address(_jrTokenContract);
+    }
+
+    /// @notice Returns the Chainlink price feed address
+    function priceFeed() external view returns (address) {
+        return address(_priceFeed);
     }
 }

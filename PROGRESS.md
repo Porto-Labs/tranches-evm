@@ -2,7 +2,7 @@
 
 **Repository:** /Users/kotashki/Documents/dev/porto/tranches-evm
 **Spec:** [docs/porto_tranching_layer.md](docs/porto_tranching_layer.md)
-**Last Updated:** 2026-01-26
+**Last Updated:** 2026-01-28
 
 ---
 
@@ -29,7 +29,7 @@ Building a tranching mechanism (UA → srUA + jrUA) for yield-bearing assets.
 | **TrancheMarket.sol** | ✅ Done (V2) | Oracle-integrated finalization |
 | **ITrancheMarket.sol** | ✅ Done | Interface with oracle support |
 | **Errors.sol** | ✅ Done | Centralized error definitions (incl. oracle errors) |
-| **PortoMath.sol** | ✅ Done | Fixed-point math (mulDown/Up, divDown/Up) |
+| **PortoMath.sol** | ✅ Done | Fixed-point math with division-by-zero protection |
 | **Spec Document** | ✅ Done | `docs/porto_tranching_layer.md` |
 | **SettlementRatioModel.sol** | ✅ Done | Waterfall logic library |
 | **MockChainlinkAggregator.sol** | ✅ Done | Test mock for Chainlink oracle |
@@ -37,8 +37,8 @@ Building a tranching mechanism (UA → srUA + jrUA) for yield-bearing assets.
 ### V2 Implementation Summary
 
 Current TrancheMarket implements:
-- `tokenize(uaIn, receiver)` - deposit UA, mint srUA + jrUA at fixed ratio
-- `redeemPreMaturity(srIn, jrIn, receiver)` - redeem UA by burning both tranches in ratio
+- `tranche(uaIn, receiver)` - deposit UA, mint srUA + jrUA at fixed ratio
+- `recombine(srIn, jrIn, receiver)` - recombine tranches into UA (pre-maturity)
 - `finalize(referencePrice, deviationThreshold)` - oracle-based finalization with deviation check
 - `previewSettlement()` - preview rates based on current oracle price
 - `redeemSenior(srIn, receiver)` - redeem senior post-finalization
@@ -49,6 +49,7 @@ Current TrancheMarket implements:
 - Automatic decimal conversion (supports 6, 8, 18 decimal oracles)
 - 24-hour staleness validation
 - Deviation threshold for reference price validation
+- `InitialPriceSet` event emitted at market creation
 
 ---
 
@@ -128,7 +129,7 @@ Chainlink oracle integration for automated settlement rate calculation using wat
 4. ✅ After expiry, multisig calls `finalize(referencePrice, deviationThreshold)`
 5. ✅ Finalize validates oracle price within threshold, calculates rates via SettlementRatioModel
 6. ✅ Post-maturity unilateral redemption works for both srUA and jrUA
-7. ✅ All integration tests pass with mock Chainlink oracle (60 total tests)
+7. ✅ All integration tests pass with mock Chainlink oracle (81 total tests)
 
 ---
 

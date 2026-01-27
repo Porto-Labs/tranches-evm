@@ -138,14 +138,16 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
 
         emit InitialPriceSet(fetchedPrice);
 
-        string memory uaSymbol = IERC20Metadata(params.ua).symbol();
+        IERC20Metadata uaMetadata = IERC20Metadata(params.ua);
+        string memory uaSymbol = uaMetadata.symbol();
+        uint8 uaDecimals = uaMetadata.decimals();
         string memory srSymbol = string(abi.encodePacked("sr", uaSymbol));
         string memory jrSymbol = string(abi.encodePacked("jr", uaSymbol));
         string memory srName = string(abi.encodePacked("Porto ", srSymbol));
         string memory jrName = string(abi.encodePacked("Porto ", jrSymbol));
 
-        _srTokenContract = new TrancheToken(srName, srSymbol, address(this));
-        _jrTokenContract = new TrancheToken(jrName, jrSymbol, address(this));
+        _srTokenContract = new TrancheToken(srName, srSymbol, address(this), uaDecimals);
+        _jrTokenContract = new TrancheToken(jrName, jrSymbol, address(this), uaDecimals);
     }
 
     // ============ Pre-Maturity Functions ============

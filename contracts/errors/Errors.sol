@@ -76,6 +76,11 @@ library Errors {
     /// @notice Thrown when deviation threshold is invalid (> 100%)
     error OracleInvalidDeviationThreshold();
 
+    // ============ Math Errors ============
+
+    /// @notice Thrown when attempting to divide by zero
+    error DivisionByZero();
+
     // ============ General Errors ============
 
     /// @notice Thrown when a zero address is provided where not allowed

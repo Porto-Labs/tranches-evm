@@ -131,9 +131,12 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
 
         _priceFeed = AggregatorV3Interface(params.priceFeed);
         _priceFeedDecimals = AggregatorV3Interface(params.priceFeed).decimals();
-        initialPrice = _getOraclePrice();
+        uint256 fetchedPrice = _getOraclePrice();
+        initialPrice = fetchedPrice;
         seniorFloor = params.seniorFloor;
         seniorTarget = params.seniorTarget;
+
+        emit InitialPriceSet(fetchedPrice);
 
         string memory uaSymbol = IERC20Metadata(params.ua).symbol();
         string memory srSymbol = string(abi.encodePacked("sr", uaSymbol));
@@ -148,18 +151,23 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     // ============ Pre-Maturity Functions ============
 
     /**
-     * @notice Tokenize UA into tranches at fixed ratio (pre-maturity only)
+     * @notice Divide UA into tranches at fixed ratio (pre-maturity only)
+     * @dev Both srOut and jrOut round down, so srOut + jrOut <= uaIn.
+     *      Any dust remains in the contract and is distributed at finalization.
      * @param uaIn Amount of UA to lock
      * @param receiver Address to receive tranche tokens
      * @return srOut Amount of senior tokens minted
      * @return jrOut Amount of junior tokens minted
      */
-    function tokenize(uint256 uaIn, address receiver) external nonReentrant returns (uint256 srOut, uint256 jrOut) {
+    function tranche(
+        uint256 uaIn,
+        address receiver
+    ) external override nonReentrant returns (uint256 srOut, uint256 jrOut) {
         if (block.timestamp >= expiry) revert Errors.TrancheMarketExpired();
         if (uaIn == 0) revert Errors.TrancheZeroAmount();
         if (receiver == address(0)) revert Errors.ZeroAddress();
 
-        IERC20(address(_uaToken)).safeTransferFrom(msg.sender, address(this), uaIn);
+        _uaToken.safeTransferFrom(msg.sender, address(this), uaIn);
 
         srOut = uaIn.mulDown(seniorRatio);
         jrOut = uaIn.mulDown(juniorRatio);
@@ -167,21 +175,21 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         _srTokenContract.mint(receiver, srOut);
         _jrTokenContract.mint(receiver, jrOut);
 
-        emit Tokenize(msg.sender, receiver, uaIn, srOut, jrOut);
+        emit Tranche(msg.sender, receiver, uaIn, srOut, jrOut);
     }
 
     /**
-     * @notice Redeem UA by burning both tranches in correct ratio (pre-maturity only)
+     * @notice Recombine tranches into UA by burning both in correct ratio (pre-maturity only)
      * @param srIn Amount of senior tokens to burn
      * @param jrIn Amount of junior tokens to burn
      * @param receiver Address to receive UA
      * @return uaOut Amount of UA returned
      */
-    function redeemPreMaturity(
+    function recombine(
         uint256 srIn,
         uint256 jrIn,
         address receiver
-    ) external nonReentrant returns (uint256 uaOut) {
+    ) external override nonReentrant returns (uint256 uaOut) {
         if (block.timestamp >= expiry) revert Errors.TrancheMarketExpired();
         if (srIn == 0 || jrIn == 0) revert Errors.TrancheZeroAmount();
         if (receiver == address(0)) revert Errors.ZeroAddress();
@@ -195,9 +203,9 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
 
         uaOut = srIn.divDown(seniorRatio); // or jrIn.divDown(juniorRatio) - same result
 
-        IERC20(address(_uaToken)).safeTransfer(receiver, uaOut);
+        _uaToken.safeTransfer(receiver, uaOut);
 
-        emit RedeemPreMaturity(msg.sender, receiver, srIn, jrIn, uaOut);
+        emit Recombine(msg.sender, receiver, srIn, jrIn, uaOut);
     }
 
     // ============ Finalization ============
@@ -209,7 +217,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @param referencePrice Expected price for deviation validation (PROTOCOL_DEFAULT_DECIMALS precision)
      * @param deviationThreshold Maximum allowed deviation from oracle price (1e18 precision, e.g., 0.01e18 = 1%)
      */
-    function finalize(uint256 referencePrice, uint256 deviationThreshold) external onlyAdmin nonReentrant {
+    function finalize(uint256 referencePrice, uint256 deviationThreshold) external override onlyAdmin nonReentrant {
         if (block.timestamp < expiry) revert Errors.TrancheMarketNotExpired();
         if (finalized) revert Errors.TrancheMarketAlreadyFinalized();
         if (deviationThreshold > 1e18) revert Errors.OracleInvalidDeviationThreshold();
@@ -228,7 +236,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         if (deviation > deviationThreshold) revert Errors.OraclePriceDeviationExceeded();
 
         // Calculate settlement rates using SettlementRatioModel
-        uint256 uaQuantity = IERC20(address(_uaToken)).balanceOf(address(this));
+        uint256 uaQuantity = _uaToken.balanceOf(address(this));
         SettlementRatioModel.SettlementParams memory params = SettlementRatioModel.SettlementParams({
             uaQuantity: uaQuantity,
             initialPrice: initialPrice,
@@ -255,14 +263,14 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @param receiver Address to receive UA
      * @return uaOut Amount of UA returned
      */
-    function redeemSenior(uint256 srIn, address receiver) external nonReentrant returns (uint256 uaOut) {
+    function redeemSenior(uint256 srIn, address receiver) external override nonReentrant returns (uint256 uaOut) {
         if (!finalized) revert Errors.TrancheMarketNotFinalized();
         if (srIn == 0) revert Errors.TrancheZeroAmount();
         if (receiver == address(0)) revert Errors.ZeroAddress();
 
         _srTokenContract.burn(msg.sender, srIn);
         uaOut = srIn.mulDown(srRateUA);
-        IERC20(address(_uaToken)).safeTransfer(receiver, uaOut);
+        _uaToken.safeTransfer(receiver, uaOut);
 
         emit RedeemSenior(msg.sender, receiver, srIn, uaOut);
     }
@@ -273,7 +281,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @param receiver Address to receive UA
      * @return uaOut Amount of UA returned (may be 0 if jrRateUA is 0)
      */
-    function redeemJunior(uint256 jrIn, address receiver) external nonReentrant returns (uint256 uaOut) {
+    function redeemJunior(uint256 jrIn, address receiver) external override nonReentrant returns (uint256 uaOut) {
         if (!finalized) revert Errors.TrancheMarketNotFinalized();
         if (jrIn == 0) revert Errors.TrancheZeroAmount();
         if (receiver == address(0)) revert Errors.ZeroAddress();
@@ -282,7 +290,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         uaOut = jrIn.mulDown(jrRateUA);
 
         if (uaOut > 0) {
-            IERC20(address(_uaToken)).safeTransfer(receiver, uaOut);
+            _uaToken.safeTransfer(receiver, uaOut);
         }
 
         emit RedeemJunior(msg.sender, receiver, jrIn, uaOut);
@@ -294,7 +302,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @notice Change the admin address
      * @param _newAdmin The new admin address
      */
-    function setAdmin(address _newAdmin) external onlyAdmin {
+    function setAdmin(address _newAdmin) external override onlyAdmin {
         if (_newAdmin == address(0)) revert Errors.ZeroAddress();
         admin = _newAdmin;
         emit AdminChanged(_newAdmin);
@@ -304,15 +312,22 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
 
     /**
      * @notice Preview settlement rates based on current oracle price
-     * @dev Read-only function that calculates what rates would be at finalization
-     *      Uses current oracle price and SettlementRatioModel waterfall logic
+     * @dev Read-only function that calculates what rates would be at finalization.
+     *      Uses current oracle price and SettlementRatioModel waterfall logic.
+     *      Returns projected rates based on CURRENT oracle price.
+     *      Actual rates at finalize() may differ if called in a different block.
      * @return _srRateUA Projected senior redemption rate (UA per srUA)
      * @return _jrRateUA Projected junior redemption rate (UA per jrUA)
      * @return oraclePrice Current price from oracle (1e18 precision)
      */
-    function previewSettlement() external view returns (uint256 _srRateUA, uint256 _jrRateUA, uint256 oraclePrice) {
+    function previewSettlement()
+        external
+        view
+        override
+        returns (uint256 _srRateUA, uint256 _jrRateUA, uint256 oraclePrice)
+    {
         oraclePrice = _getOraclePrice();
-        uint256 uaQuantity = IERC20(address(_uaToken)).balanceOf(address(this));
+        uint256 uaQuantity = _uaToken.balanceOf(address(this));
 
         SettlementRatioModel.SettlementParams memory params = SettlementRatioModel.SettlementParams({
             uaQuantity: uaQuantity,
@@ -368,22 +383,22 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     // ============ View Functions ============
 
     /// @notice Returns the Underlying Asset token address
-    function ua() external view returns (address) {
+    function ua() external view override returns (address) {
         return address(_uaToken);
     }
 
     /// @notice Returns the senior tranche token address
-    function srToken() external view returns (address) {
+    function srToken() external view override returns (address) {
         return address(_srTokenContract);
     }
 
     /// @notice Returns the junior tranche token address
-    function jrToken() external view returns (address) {
+    function jrToken() external view override returns (address) {
         return address(_jrTokenContract);
     }
 
     /// @notice Returns the Chainlink price feed address
-    function priceFeed() external view returns (address) {
+    function priceFeed() external view override returns (address) {
         return address(_priceFeed);
     }
 }

@@ -167,9 +167,9 @@ describe('TrancheMarket', function () {
     });
 
     context('when fetching oracle prices', function () {
-        it('Should scale 8 decimal price to WAD correctly', async function () {
-            // Tokenize to have UA in the market
-            await market.connect(user).tokenize(parseEther('100'), user.address);
+        it('Should scale 8 decimal price to 18 decimals correctly', async function () {
+            // Tranche UA to have tokens in the market
+            await market.connect(user).tranche(parseEther('100'), user.address);
 
             // Move past expiry
             await time.increase(TIME.MONTH + 1);
@@ -177,7 +177,7 @@ describe('TrancheMarket', function () {
             // Set oracle to $1.50 (150000000 in 8 decimals) - after time increase to avoid staleness
             await oracle.setRoundData(150000000n, await time.latest());
 
-            // Preview should return price in WAD
+            // Preview should return price in 18 decimal precision
             const [, , oraclePrice] = await market.previewSettlement();
             expect(oraclePrice).to.equal(parseEther('1.5'));
         });
@@ -194,7 +194,7 @@ describe('TrancheMarket', function () {
             const market18 = await MarketFactory.deploy(params);
 
             await ua.connect(user).approve(await market18.getAddress(), parseEther('100'));
-            await market18.connect(user).tokenize(parseEther('100'), user.address);
+            await market18.connect(user).tranche(parseEther('100'), user.address);
             await time.increase(TIME.MONTH + 1);
 
             // Refresh oracle price after time increase
@@ -216,7 +216,7 @@ describe('TrancheMarket', function () {
             const market6 = await MarketFactory.deploy(params);
 
             await ua.connect(user).approve(await market6.getAddress(), parseEther('100'));
-            await market6.connect(user).tokenize(parseEther('100'), user.address);
+            await market6.connect(user).tranche(parseEther('100'), user.address);
             await time.increase(TIME.MONTH + 1);
 
             // Refresh oracle price after time increase
@@ -229,8 +229,8 @@ describe('TrancheMarket', function () {
 
     describe('finalize', function () {
         beforeEach(async function () {
-            // Tokenize to have UA in the market
-            await market.connect(user).tokenize(parseEther('100'), user.address);
+            // Tranche UA to have tokens in the market
+            await market.connect(user).tranche(parseEther('100'), user.address);
             // Move past expiry
             await time.increase(TIME.MONTH + 1);
             // Refresh oracle price after time increase (set to $1.00)
@@ -390,7 +390,7 @@ describe('TrancheMarket', function () {
 
     context('when calculating waterfall conditions', function () {
         beforeEach(async function () {
-            await market.connect(user).tokenize(parseEther('100'), user.address);
+            await market.connect(user).tranche(parseEther('100'), user.address);
             await time.increase(TIME.MONTH + 1);
             // Oracle will be set in each test with the specific price
         });
@@ -458,7 +458,7 @@ describe('TrancheMarket', function () {
 
     describe('previewSettlement', function () {
         beforeEach(async function () {
-            await market.connect(user).tokenize(parseEther('100'), user.address);
+            await market.connect(user).tranche(parseEther('100'), user.address);
             await time.increase(TIME.MONTH + 1);
             // Oracle will be set in each test with the specific price
         });
@@ -518,7 +518,7 @@ describe('TrancheMarket', function () {
 
     context('when redeeming post-finalization', function () {
         beforeEach(async function () {
-            await market.connect(user).tokenize(parseEther('100'), user.address);
+            await market.connect(user).tranche(parseEther('100'), user.address);
             await time.increase(TIME.MONTH + 1);
             // Refresh oracle price after time increase
             await oracle.setRoundData(100000000n, await time.latest());
@@ -581,7 +581,7 @@ describe('TrancheMarket', function () {
                 const testMarket = await MarketFactory.deploy(params);
 
                 await ua.connect(user).approve(await testMarket.getAddress(), parseEther('100'));
-                await testMarket.connect(user).tokenize(parseEther('100'), user.address);
+                await testMarket.connect(user).tranche(parseEther('100'), user.address);
                 await time.increase(TIME.MONTH + 1);
 
                 // Set oracle price after time increase to avoid staleness

@@ -12,30 +12,24 @@ interface ITrancheMarket {
     // ============ Events ============
 
     /**
-     * @notice Emitted when UA is tokenized into tranches
-     * @param caller Address that called tokenize
+     * @notice Emitted when UA is divided into tranches
+     * @param caller Address that called tranche
      * @param receiver Address receiving the tranche tokens
      * @param uaIn Amount of UA locked
      * @param srOut Amount of senior tokens minted
      * @param jrOut Amount of junior tokens minted
      */
-    event Tokenize(address indexed caller, address indexed receiver, uint256 uaIn, uint256 srOut, uint256 jrOut);
+    event Tranche(address indexed caller, address indexed receiver, uint256 uaIn, uint256 srOut, uint256 jrOut);
 
     /**
-     * @notice Emitted when tranches are redeemed for UA before maturity
-     * @param caller Address that called redeemPreMaturity
+     * @notice Emitted when tranches are recombined into UA before maturity
+     * @param caller Address that called recombine
      * @param receiver Address receiving the UA
      * @param srIn Amount of senior tokens burned
      * @param jrIn Amount of junior tokens burned
      * @param uaOut Amount of UA returned
      */
-    event RedeemPreMaturity(
-        address indexed caller,
-        address indexed receiver,
-        uint256 srIn,
-        uint256 jrIn,
-        uint256 uaOut
-    );
+    event Recombine(address indexed caller, address indexed receiver, uint256 srIn, uint256 jrIn, uint256 uaOut);
 
     /**
      * @notice Emitted when the market is finalized with oracle-calculated rates
@@ -70,10 +64,16 @@ interface ITrancheMarket {
      */
     event AdminChanged(address indexed newAdmin);
 
+    /**
+     * @notice Emitted when the initial price is set during market creation
+     * @param price Initial UA price from oracle (1e18 precision)
+     */
+    event InitialPriceSet(uint256 price);
+
     // ============ Core Functions ============
 
     /**
-     * @notice Tokenize UA into srUA + jrUA at fixed ratio (pre-maturity only)
+     * @notice Divide UA into srUA + jrUA at fixed ratio (pre-maturity only)
      * @dev Transfers uaIn from caller, mints tranches to receiver
      *      Ratio: srOut = uaIn * seniorRatio, jrOut = uaIn * juniorRatio
      * @param uaIn Amount of UA to lock
@@ -81,10 +81,10 @@ interface ITrancheMarket {
      * @return srOut Amount of senior tokens minted
      * @return jrOut Amount of junior tokens minted
      */
-    function tokenize(uint256 uaIn, address receiver) external returns (uint256 srOut, uint256 jrOut);
+    function tranche(uint256 uaIn, address receiver) external returns (uint256 srOut, uint256 jrOut);
 
     /**
-     * @notice Redeem UA by burning both tranches in correct ratio (pre-maturity only)
+     * @notice Recombine tranches into UA by burning both in correct ratio (pre-maturity only)
      * @dev Burns srIn and jrIn from caller, transfers UA to receiver
      *      Requires: srIn / seniorRatio == jrIn / juniorRatio (fixed ratio)
      * @param srIn Amount of senior tokens to burn
@@ -92,14 +92,14 @@ interface ITrancheMarket {
      * @param receiver Address to receive UA
      * @return uaOut Amount of UA returned
      */
-    function redeemPreMaturity(uint256 srIn, uint256 jrIn, address receiver) external returns (uint256 uaOut);
+    function recombine(uint256 srIn, uint256 jrIn, address receiver) external returns (uint256 uaOut);
 
     /**
      * @notice Finalize redemption rates at maturity using oracle price
      * @dev Admin provides reference price for deviation check, oracle price is fetched on-chain
      *      Contract calculates rates using SettlementRatioModel waterfall logic
-     * @param referencePrice Expected price for deviation validation (WAD precision)
-     * @param deviationThreshold Maximum allowed deviation from oracle price (WAD precision, e.g., 0.01e18 = 1%)
+     * @param referencePrice Expected price for deviation validation (1e18 precision)
+     * @param deviationThreshold Maximum allowed deviation from oracle price (1e18 precision, e.g., 0.01e18 = 1%)
      */
     function finalize(uint256 referencePrice, uint256 deviationThreshold) external;
 
@@ -148,10 +148,10 @@ interface ITrancheMarket {
     /// @notice Returns whether the market has been finalized
     function finalized() external view returns (bool);
 
-    /// @notice Returns the senior tranche ratio (WAD precision, e.g., 0.8e18 for 80%)
+    /// @notice Returns the senior tranche ratio (1e18 precision, e.g., 0.8e18 for 80%)
     function seniorRatio() external view returns (uint256);
 
-    /// @notice Returns the junior tranche ratio (WAD precision, e.g., 0.2e18 for 20%)
+    /// @notice Returns the junior tranche ratio (1e18 precision, e.g., 0.2e18 for 20%)
     function juniorRatio() external view returns (uint256);
 
     /// @notice Returns the senior redemption rate (UA per srUA, set at finalization)
@@ -166,13 +166,13 @@ interface ITrancheMarket {
     /// @notice Returns the Chainlink price feed address
     function priceFeed() external view returns (address);
 
-    /// @notice Returns the initial UA price at market creation (WAD precision)
+    /// @notice Returns the initial UA price at market creation (1e18 precision)
     function initialPrice() external view returns (uint256);
 
-    /// @notice Returns the senior floor yield (WAD precision, e.g., 0.0033e18 = 0.33%)
+    /// @notice Returns the senior floor yield (1e18 precision, e.g., 0.0033e18 = 0.33%)
     function seniorFloor() external view returns (uint256);
 
-    /// @notice Returns the senior target yield (WAD precision, e.g., 0.005e18 = 0.5%)
+    /// @notice Returns the senior target yield (1e18 precision, e.g., 0.005e18 = 0.5%)
     function seniorTarget() external view returns (uint256);
 
     /**
@@ -181,7 +181,7 @@ interface ITrancheMarket {
      *      Uses current oracle price and SettlementRatioModel waterfall logic
      * @return srRateUA Projected senior redemption rate (UA per srUA)
      * @return jrRateUA Projected junior redemption rate (UA per jrUA)
-     * @return oraclePrice Current price from oracle (WAD precision)
+     * @return oraclePrice Current price from oracle (1e18 precision)
      */
     function previewSettlement() external view returns (uint256 srRateUA, uint256 jrRateUA, uint256 oraclePrice);
 }

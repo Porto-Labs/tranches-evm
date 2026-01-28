@@ -88,7 +88,7 @@ library SettlementRatioModel {
     }
 
     /**
-     * @notice Calculate senior and junior principals from inputs
+     * @notice Calculate senior and junior principals from inputs and initial price snapshot.
      * @dev Senior principal rounds UP to protect seniors; junior is remainder for exact sum
      * @param uaQuantity Total UA in the tranche
      * @param initialPrice UA price at tokenization
@@ -107,10 +107,10 @@ library SettlementRatioModel {
     }
 
     /**
-     * @notice Calculate floor and target thresholds
+     * @notice Calculate floor and target thresholds in USD
      * @dev Both floor and target round UP to favor seniors:
-     *      - Floor rounds UP to protect the minimum guarantee
-     *      - Target rounds UP so seniors get full benefit in surplus scenarios
+     *      - Floor APY rounds UP
+     *      - Target APY rounds UP
      * @param srPrincipalUsd Senior principal in USD
      * @param seniorFloor Floor yield for the period
      * @param seniorTarget Target yield for the period
@@ -141,12 +141,15 @@ library SettlementRatioModel {
         uint256 srFloorUsd,
         uint256 srTargetUsd
     ) internal pure returns (uint256 seniorPayout, uint256 juniorPayout) {
+        // Condition A: Surplus
         if (totalValueUsd >= srTargetUsd + jrPrincipalUsd) {
             seniorPayout = srTargetUsd;
             juniorPayout = totalValueUsd - srTargetUsd;
+            // Condition B: Target APY Compression
         } else if (totalValueUsd >= srFloorUsd + jrPrincipalUsd) {
             seniorPayout = totalValueUsd - jrPrincipalUsd;
             juniorPayout = jrPrincipalUsd;
+            // Condition C: Junior Erosion
         } else {
             seniorPayout = PortoMath.min(totalValueUsd, srFloorUsd);
             juniorPayout = totalValueUsd > seniorPayout ? totalValueUsd - seniorPayout : 0;

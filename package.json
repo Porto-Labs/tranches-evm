@@ -55,6 +55,7 @@
     "format:check": "prettier --check 'contracts/**/*.sol' 'test/**/*.ts'"
   },
   "dependencies": {
+    "@chainlink/contracts": "^1.3.0",
     "@openzeppelin/contracts": "^4.9.3",
     "ethers": "^6.13.0"
   }

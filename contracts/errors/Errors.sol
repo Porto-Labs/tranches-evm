@@ -81,6 +81,23 @@ library Errors {
     /// @notice Thrown when attempting to divide by zero
     error DivisionByZero();
 
+    // ============ Liquidation Errors ============
+
+    /// @notice Thrown when liquidation is attempted on a market with liquidation disabled
+    error LiquidationNotEnabled();
+
+    /// @notice Thrown when liquidation conditions are not met (price above threshold)
+    error LiquidationConditionNotMet();
+
+    /// @notice Thrown when liquidation is attempted after market expiry
+    error LiquidationAfterExpiry();
+
+    /// @notice Thrown when liquidation buffer exceeds maximum allowed (2.5%)
+    error LiquidationInvalidBuffer();
+
+    /// @notice Thrown when liquidation reward exceeds maximum allowed (2.5%)
+    error LiquidationInvalidReward();
+
     // ============ General Errors ============
 
     /// @notice Thrown when a zero address is provided where not allowed

@@ -7,15 +7,15 @@ import { ISwapRouter } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRou
 import { IUniswapV3Pool } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import { IUniswapV3SwapCallback } from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
 import { ITrancheMarket } from "../interfaces/ITrancheMarket.sol";
+import { IRouter } from "../interfaces/IRouter.sol";
 import { Errors } from "../errors/Errors.sol";
 
 /**
  * @title Router
- * @notice Router contract for buying and selling senior tranche tokens via Uniswap V3
- * @dev Integrates TrancheMarket tokenization with Uniswap V3 liquidity pools
- *      Pool structure: UA/srToken pair on Uniswap V3
+ * @notice Router contract for buying and selling senior and junior tranche tokens via Uniswap V3
+ * @dev Pool structure: UA/srToken pair on Uniswap V3
  */
-contract Router is IUniswapV3SwapCallback {
+contract Router is IRouter, IUniswapV3SwapCallback {
     using SafeERC20 for IERC20;
 
     uint160 private constant MIN_SQRT_RATIO = 4295128739;
@@ -43,42 +43,16 @@ contract Router is IUniswapV3SwapCallback {
     /// @notice Uniswap V3 Pool address (UA/srToken)
     IUniswapV3Pool public immutable uniswapPool;
 
-    // ============ Events ============
+    /// @notice Uniswap V3 pool fee tier (e.g., 3000 = 0.3%)
+    uint24 public immutable poolFee;
 
-    /**
-     * @notice Emitted when senior tokens are bought
-     * @param buyer Address that bought the tokens
-     * @param uaIn Amount of UA deposited
-     * @param srOut Amount of senior tokens received
-     */
-    event BuySenior(address indexed buyer, uint256 uaIn, uint256 srOut);
+    // ============ Modifiers ============
 
-    /**
-     * @notice Emitted when senior tokens are sold
-     * @param seller Address that sold the tokens
-     * @param srIn Amount of senior tokens sold
-     * @param uaOut Amount of UA received
-     */
-    event SellSenior(address indexed seller, uint256 srIn, uint256 uaOut);
-
-    /**
-     * @notice Emitted when junior tokens are sold via flash swap
-     * @param seller Address that sold the tokens
-     * @param jrIn Amount of junior tokens sold
-     * @param uaOut Amount of UA received
-     */
-    event SellJunior(address indexed seller, uint256 jrIn, uint256 uaOut);
-
-    // ============ Errors ============
-
-    /// @notice Thrown when transaction deadline has passed
-    error RouterDeadlineExpired();
-
-    /// @notice Thrown when callback caller is not the Uniswap pool
-    error RouterUnauthorizedCallback();
-
-    /// @notice Thrown when output is less than minimum required
-    error InsufficientOutput();
+    /// @notice Ensures transaction is executed before deadline
+    modifier checkDeadline(uint256 deadline) {
+        if (deadline < block.timestamp) revert RouterDeadlineExpired();
+        _;
+    }
 
     // ============ Constructor ============
 
@@ -87,8 +61,9 @@ contract Router is IUniswapV3SwapCallback {
      * @param _swapRouter Uniswap V3 SwapRouter address
      * @param _trancheMarket TrancheMarket contract address
      * @param _uniswapPool Uniswap V3 Pool address (UA/srToken)
+     * @param _poolFee Uniswap V3 pool fee tier (e.g., 3000 for 0.3%)
      */
-    constructor(address _swapRouter, address _trancheMarket, address _uniswapPool) {
+    constructor(address _swapRouter, address _trancheMarket, address _uniswapPool, uint24 _poolFee) {
         if (_swapRouter == address(0) || _trancheMarket == address(0) || _uniswapPool == address(0)) {
             revert Errors.ZeroAddress();
         }
@@ -96,13 +71,14 @@ contract Router is IUniswapV3SwapCallback {
         swapRouter = ISwapRouter(_swapRouter);
         trancheMarket = ITrancheMarket(_trancheMarket);
         uniswapPool = IUniswapV3Pool(_uniswapPool);
+        poolFee = _poolFee;
     }
 
     // ============ Core Functions ============
 
     /**
      * @notice Buy senior tranche tokens by depositing UA
-     * @dev Strategy: Swap UA for srToken on Uniswap V3 pool
+     * @dev Swap UA for srToken on Uniswap V3 pool
      * @param uaIn Amount of UA to deposit
      * @param minSrOut Minimum amount of senior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
@@ -112,24 +88,20 @@ contract Router is IUniswapV3SwapCallback {
         uint256 uaIn,
         uint256 minSrOut,
         uint256 deadline
-    ) external returns (uint256 srOut) {
+    ) external override checkDeadline(deadline) returns (uint256 srOut) {
         if (uaIn == 0) revert Errors.TrancheZeroAmount();
-        if (deadline < block.timestamp) revert RouterDeadlineExpired();
 
-        // Get swap parameters from TrancheMarket
-        (address uaAddress, address srAddress, , uint24 fee) = trancheMarket.getSwapParameters();
+        (address uaAddress, address srAddress, ) = trancheMarket.getSwapParameters();
 
-        // Transfer UA from user to router
         IERC20(uaAddress).safeTransferFrom(msg.sender, address(this), uaIn);
 
-        // Approve SwapRouter to spend UA
         IERC20(uaAddress).forceApprove(address(swapRouter), uaIn);
 
         // Swap UA for senior tokens on Uniswap V3
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: uaAddress,
             tokenOut: srAddress,
-            fee: fee,
+            fee: poolFee,
             recipient: msg.sender,
             deadline: deadline,
             amountIn: uaIn,
@@ -144,7 +116,7 @@ contract Router is IUniswapV3SwapCallback {
 
     /**
      * @notice Sell senior tranche tokens for UA
-     * @dev Strategy: Swap srToken for UA on Uniswap V3 pool
+     * @dev Swap srToken for UA on Uniswap V3 pool
      * @param srIn Amount of senior tokens to sell
      * @param minUaOut Minimum amount of UA to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
@@ -154,24 +126,20 @@ contract Router is IUniswapV3SwapCallback {
         uint256 srIn,
         uint256 minUaOut,
         uint256 deadline
-    ) external returns (uint256 uaOut) {
+    ) external override checkDeadline(deadline) returns (uint256 uaOut) {
         if (srIn == 0) revert Errors.TrancheZeroAmount();
-        if (deadline < block.timestamp) revert RouterDeadlineExpired();
 
-        // Get swap parameters from TrancheMarket
-        (address uaAddress, address srAddress, , uint24 fee) = trancheMarket.getSwapParameters();
+        (address uaAddress, address srAddress, ) = trancheMarket.getSwapParameters();
 
-        // Transfer senior tokens from user to router
         IERC20(srAddress).safeTransferFrom(msg.sender, address(this), srIn);
 
-        // Approve SwapRouter to spend senior tokens
         IERC20(srAddress).forceApprove(address(swapRouter), srIn);
 
         // Swap senior tokens for UA on Uniswap V3
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: srAddress,
             tokenOut: uaAddress,
-            fee: fee,
+            fee: poolFee,
             recipient: msg.sender,
             deadline: deadline,
             amountIn: srIn,
@@ -200,11 +168,10 @@ contract Router is IUniswapV3SwapCallback {
         uint256 jrIn,
         uint256 minUaOut,
         uint256 deadline
-    ) external {
+    ) external override checkDeadline(deadline) {
         if (jrIn == 0) revert Errors.TrancheZeroAmount();
-        if (deadline < block.timestamp) revert RouterDeadlineExpired();
 
-        (address uaAddress, address srAddress, address jrAddress, ) = trancheMarket.getSwapParameters();
+        (address uaAddress, address srAddress, address jrAddress) = trancheMarket.getSwapParameters();
 
         IERC20(jrAddress).safeTransferFrom(msg.sender, address(this), jrIn);
 
@@ -241,19 +208,17 @@ contract Router is IUniswapV3SwapCallback {
             (address, uint256, uint256, SwapOperation)
         );
 
-        (address uaAddress, address srAddress, address jrAddress, uint24 fee) = trancheMarket.getSwapParameters();
+        (address uaAddress, address srAddress, address jrAddress) = trancheMarket.getSwapParameters();
 
         bool uaIsToken0 = uaAddress < srAddress;
 
-        // Route to operation handler
+        // Operation handler
         if (operation == SwapOperation.SELL_JUNIOR) {
 
-            // Extract amounts based on token ordering
-            // Negative delta = received from pool, positive delta = owe to pool
+            // Extract SR borrowed amount based on token ordering (negative delta = received from pool)
             uint256 srBorrowed = uaIsToken0 ? uint256(-amount1Delta) : uint256(-amount0Delta);
-            uint256 uaOwed = uaIsToken0 ? uint256(amount0Delta) : uint256(amount1Delta);
 
-            _handleSellJunior(user, jrIn, minUaOut, srBorrowed, uaAddress, srAddress, jrAddress, fee);
+            _handleSellJunior(user, jrIn, minUaOut, srBorrowed, uaAddress, srAddress, jrAddress);
         } else if (operation == SwapOperation.BUY_JUNIOR) {
             // TODO: Implement buy junior with leverage
             revert("BUY_JUNIOR not implemented yet");
@@ -279,20 +244,19 @@ contract Router is IUniswapV3SwapCallback {
         uint256 srBorrowed,
         address uaAddress,
         address srAddress,
-        address jrAddress,
-        uint24 fee
+        address jrAddress
     ) internal {
         IERC20(srAddress).forceApprove(address(trancheMarket), srBorrowed);
         IERC20(jrAddress).forceApprove(address(trancheMarket), jrIn);
 
-        uint256 uaReceived = trancheMarket.redeemPreMaturity(srBorrowed, jrIn, address(this));
+        uint256 uaReceived = trancheMarket.recombine(srBorrowed, jrIn, address(this));
 
         IERC20(uaAddress).forceApprove(address(swapRouter), uaReceived);
 
         ISwapRouter.ExactOutputSingleParams memory swapParams = ISwapRouter.ExactOutputSingleParams({
             tokenIn: uaAddress,
             tokenOut: srAddress,
-            fee: fee,
+            fee: poolFee,
             recipient: address(this),
             deadline: block.timestamp,
             amountOut: srBorrowed, // Exact amount of SR we need to return
@@ -313,7 +277,7 @@ contract Router is IUniswapV3SwapCallback {
 
     // ============ View Functions ============
 
-    function calculateSeniorNeeded(uint256 jrAmount) public view returns (uint256 srNeeded) {
+    function calculateSeniorNeeded(uint256 jrAmount) public view override returns (uint256 srNeeded) {
         uint256 seniorRatio = trancheMarket.seniorRatio();
         uint256 juniorRatio = trancheMarket.juniorRatio();
         srNeeded = (jrAmount * seniorRatio) / juniorRatio;

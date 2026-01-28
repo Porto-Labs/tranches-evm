@@ -38,7 +38,6 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         address priceFeed;
         uint256 seniorFloor;
         uint256 seniorTarget;
-        uint24 poolFee;
     }
 
     // ============ Immutables ============
@@ -101,9 +100,6 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     /// @notice Junior redemption rate (UA per jrUA, set at finalization)
     uint256 public jrRateUA;
 
-    /// @notice Uniswap V3 pool fee tier for Router swaps (e.g., 3000 = 0.3%)
-    uint24 public poolFee;
-
     // ============ Modifiers ============
 
     /**
@@ -132,7 +128,6 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         seniorRatio = params.seniorRatio;
         juniorRatio = ONE - params.seniorRatio;
         admin = params.admin;
-        poolFee = params.poolFee;
 
         _priceFeed = AggregatorV3Interface(params.priceFeed);
         _priceFeedDecimals = AggregatorV3Interface(params.priceFeed).decimals();
@@ -413,13 +408,12 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     /// @return uaAddress Underlying Asset token address
     /// @return srAddress Senior tranche token address
     /// @return jrAddress Junior tranche token address
-    /// @return fee Uniswap V3 pool fee tier
     function getSwapParameters()
         external
         view
         override
-        returns (address uaAddress, address srAddress, address jrAddress, uint24 fee)
+        returns (address uaAddress, address srAddress, address jrAddress)
     {
-        return (address(_uaToken), address(_srTokenContract), address(_jrTokenContract), poolFee);
+        return (address(_uaToken), address(_srTokenContract), address(_jrTokenContract));
     }
 }

@@ -41,6 +41,8 @@ Current TrancheMarket implements:
 - `recombine(srIn, jrIn, receiver)` - recombine tranches into UA (pre-maturity)
 - `finalize(referencePrice, deviationThreshold)` - oracle-based finalization with deviation check
 - `previewSettlement()` - preview rates based on current oracle price
+- `liquidate()` - premature finalization when liquidation conditions are met
+- `previewLiquidation()` - preview liquidation state and outcomes
 - `redeemSenior(srIn, receiver)` - redeem senior post-finalization
 - `redeemJunior(jrIn, receiver)` - redeem junior post-finalization
 
@@ -50,6 +52,13 @@ Current TrancheMarket implements:
 - 24-hour staleness validation
 - Deviation threshold for reference price validation
 - `InitialPriceSet` event emitted at market creation
+
+**Liquidation Features:**
+- Opt-in feature enabled via `liquidationEnabled` in MarketParams
+- Configurable `liquidationBuffer` and `liquidationReward` (each max 2.5%)
+- Pre-calculated `liquidationPrice` stored at market creation
+- Admin-only trigger with immediate reward distribution
+- Junior gets 0, senior gets remaining UA
 
 ---
 
@@ -81,7 +90,7 @@ Chainlink oracle integration for automated settlement rate calculation using wat
 - `contracts/interfaces/ITrancheMarket.sol` (updated interface)
 - `contracts/errors/Errors.sol` (oracle error definitions)
 - `contracts/test/MockChainlinkAggregator.sol` (test mock)
-- `test/core/TrancheMarket.test.ts` (33 tests)
+- `test/core/TrancheMarket.test.ts` (81 tests, includes 43 liquidation tests)
 
 **Features:**
 - `finalize(referencePrice, deviationThreshold)` - uses oracle price, validates deviation
@@ -90,22 +99,53 @@ Chainlink oracle integration for automated settlement rate calculation using wat
 - 24-hour staleness check
 - Constructor uses `MarketParams` struct for cleaner initialization
 
-### Phase 3: Factory & Router
+### Phase 3: Liquidation Trigger
+
+**Status:** ✅ Complete
+
+**Spec:** [docs/liquidation_trigger_feature.md](docs/liquidation_trigger_feature.md)
+
+Premature finalization mechanism triggered when junior tranche is wiped out.
+
+**Core Concept:**
+- Opt-in feature enabled at market creation
+- Triggers when oracle price falls below liquidation price (before junior fully wiped out)
+- Two configurable parameters (each max 2.5% of junior principal):
+  - `liquidationBuffer` → Extra senior protection
+  - `liquidationReward` → Liquidator incentive
+- Sets `jrRateUA = 0`, senior gets floor + buffer
+- Admin-only - same access control as `finalize()`
 
 | Task | Description | Status |
 |------|-------------|--------|
-| **3.1** | Implement `TrancheMarketFactory.sol` (Optional or maybe not needed for POC) | ⬚ Pending |
-| **3.2** | Implement `TrancheRouter.sol` (Optinal as for the POC it could be a simple Multicall contract) | ⬚ Pending |
+| **3.1** | Add `liquidationEnabled`, `liquidationBuffer`, `liquidationReward` to MarketParams | ✅ Done |
+| **3.2** | Calculate and store `liquidationPrice` at construction | ✅ Done |
+| **3.3** | Implement `liquidate()` function with reward distribution | ✅ Done |
+| **3.4** | Implement `previewLiquidation()` view | ✅ Done |
+| **3.5** | Update interface and add errors | ✅ Done |
+| **3.6** | Unit tests for liquidation feature (43 tests) | ✅ Done |
+| **3.7** | Update spec document (`docs/porto_tranching_layer.md`) with liquidation section | ✅ Done |
 
-### Phase 4: Integration Testing
+---
+
+### Phase 4: Factory & Router
+
+| Task | Description | Status |
+|------|-------------|--------|
+| **4.1** | Implement `TrancheMarketFactory.sol` (Optional, may not be needed for POC) | ⬚ Pending |
+| **4.2** | Implement `TrancheRouter.sol` (Optional, could be a simple Multicall for POC) | ⬚ Pending |
+
+---
+
+### Phase 5: Integration Testing
 
 **Status:** ✅ Complete (merged with Phase 2)
 
 | Task | Description | Status |
 |------|-------------|--------|
-| **4.1** | Unit tests for TrancheMarket (updated) | ✅ Done |
-| **4.2** | Integration tests (E2E with mock oracle) | ✅ Done |
-| **4.3** | Edge case tests (all 3 waterfall conditions) | ✅ Done |
+| **5.1** | Unit tests for TrancheMarket (updated) | ✅ Done |
+| **5.2** | Integration tests (E2E with mock oracle) | ✅ Done |
+| **5.3** | Edge case tests (all 3 waterfall conditions) | ✅ Done |
 
 **Test Coverage:**
 - Constructor validation (oracle address, initial price, yield range)
@@ -129,7 +169,8 @@ Chainlink oracle integration for automated settlement rate calculation using wat
 4. ✅ After expiry, multisig calls `finalize(referencePrice, deviationThreshold)`
 5. ✅ Finalize validates oracle price within threshold, calculates rates via SettlementRatioModel
 6. ✅ Post-maturity unilateral redemption works for both srUA and jrUA
-7. ✅ All integration tests pass with mock Chainlink oracle (81 total tests)
+7. ✅ Liquidation trigger feature with buffer/reward parameters
+8. ✅ All integration tests pass with mock Chainlink oracle (124 total tests)
 
 ---
 

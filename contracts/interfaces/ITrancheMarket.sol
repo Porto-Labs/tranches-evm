@@ -193,4 +193,12 @@ interface ITrancheMarket {
         external
         view
         returns (address uaAddress, address srAddress, address jrAddress);
+
+    /**
+     * @notice Preview the amounts of senior and junior tokens that would be minted for a given UA input
+     * @param uaIn Amount of UA to tranche
+     * @return srOut Amount of senior tokens that would be minted
+     * @return jrOut Amount of junior tokens that would be minted
+     */
+    function previewTranche(uint256 uaIn) external view returns (uint256 srOut, uint256 jrOut);
 }

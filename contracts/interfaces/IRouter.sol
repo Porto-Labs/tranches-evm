@@ -33,6 +33,30 @@ interface IRouter {
      */
     event SellJunior(address indexed seller, uint256 jrIn, uint256 uaOut);
 
+    /**
+     * @notice Emitted when junior tokens are bought
+     * @param buyer Address that bought the tokens
+     * @param uaIn Amount of UA deposited
+     * @param jrOut Amount of junior tokens received
+     */
+    event BuyJunior(address indexed buyer, uint256 uaIn, uint256 jrOut);
+
+    /**
+     * @notice Emitted when junior tokens are swapped for senior tokens
+     * @param user Address that performed the swap
+     * @param jrIn Amount of junior tokens swapped
+     * @param srOut Amount of senior tokens received
+     */
+    event SwapJuniorToSenior(address indexed user, uint256 jrIn, uint256 srOut);
+
+    /**
+     * @notice Emitted when senior tokens are swapped for junior tokens
+     * @param user Address that performed the swap
+     * @param srIn Amount of senior tokens swapped
+     * @param jrOut Amount of junior tokens received
+     */
+    event SwapSeniorToJunior(address indexed user, uint256 srIn, uint256 jrOut);
+
     // ============ Errors ============
 
     /// @notice Thrown when transaction deadline has passed
@@ -67,6 +91,20 @@ interface IRouter {
     function sellSenior(uint256 srIn, uint256 minUaOut, uint256 deadline) external returns (uint256 uaOut);
 
     /**
+     * @notice Buy junior tranche tokens by depositing UA
+     * @dev Flash swap strategy:
+     *      1. Transfer UA from user
+     *      2. Initiate flash swap to borrow UA from Uniswap pool
+     *      3. In callback: Tranche (user UA + borrowed UA) into Senior + Junior
+     *      4. In callback: Swap Senior tokens for UA to repay flash loan
+     *      5. In callback: Send Junior tokens to user
+     * @param uaIn Amount of UA to deposit
+     * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
+     * @param deadline Transaction deadline timestamp
+     */
+    function buyJunior(uint256 uaIn, uint256 minJrOut, uint256 deadline) external;
+
+    /**
      * @notice Sell junior tranche tokens for UA using flash swap
      * @dev Flash swap strategy:
      *      1. Transfer junior tokens from user
@@ -80,6 +118,35 @@ interface IRouter {
      */
     function sellJunior(uint256 jrIn, uint256 minUaOut, uint256 deadline) external;
 
+    /**
+     * @notice Swap junior tranche tokens for senior tranche tokens
+     * @dev Flash swap strategy:
+     *      1. Transfer junior tokens from user
+     *      2. Initiate flash swap to borrow SR tokens from Uniswap pool
+     *      3. In callback: Redeem SR + JR for UA via TrancheMarket
+     *      4. In callback: Swap all UA for SR tokens
+     *      5. In callback: Repay borrowed SR to pool
+     *      6. In callback: Send remaining SR to user
+     * @param jrIn Amount of junior tokens to swap
+     * @param minSrOut Minimum amount of senior tokens to receive (slippage protection)
+     * @param deadline Transaction deadline timestamp
+     */
+    function swapJuniorToSenior(uint256 jrIn, uint256 minSrOut, uint256 deadline) external;
+
+    /**
+     * @notice Swap senior tranche tokens for junior tranche tokens
+     * @dev Flash swap strategy:
+     *      1. Transfer senior tokens from user
+     *      2. Initiate flash swap to borrow UA from Uniswap pool
+     *      3. In callback: Tranche borrowed UA into SR + JR
+     *      4. In callback: Sell (user SR + minted SR) for UA to repay flash loan
+     *      5. In callback: Send minted JR to user
+     * @param srIn Amount of senior tokens to swap
+     * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
+     * @param deadline Transaction deadline timestamp
+     */
+    function swapSeniorToJunior(uint256 srIn, uint256 minJrOut, uint256 deadline) external;
+
     // ============ View Functions ============
 
     /**
@@ -88,4 +155,11 @@ interface IRouter {
      * @return srNeeded Amount of senior tokens needed
      */
     function calculateSeniorNeeded(uint256 jrAmount) external view returns (uint256 srNeeded);
+
+    /**
+     * @notice Calculate the amount of underlying tokens needed to create a given amount of senior tokens
+     * @param srAmount Amount of senior tokens
+     * @return uaNeeded Amount of underlying tokens needed
+     */
+    function calculateUnderlyingNeeded(uint256 srAmount) external view returns (uint256 uaNeeded);
 }

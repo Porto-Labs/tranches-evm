@@ -12,8 +12,9 @@ import { Errors } from "../errors/Errors.sol";
 
 /**
  * @title Router
- * @notice Router contract for buying and selling senior and junior tranche tokens via Uniswap V3
- * @dev Pool structure: UA/srToken pair on Uniswap V3
+ * @notice Router for trading tranche tokens via Uniswap V3 UA/SR pool
+ * @dev Senior operations use direct swaps. Junior operations use flash swaps
+ *      since no JR liquidity pool exists - borrow SR, recombine/tranche, repay.
  */
 contract Router is IRouter, IUniswapV3SwapCallback {
     using SafeERC20 for IERC20;
@@ -46,11 +47,20 @@ contract Router is IRouter, IUniswapV3SwapCallback {
     /// @notice Uniswap V3 pool fee tier (e.g., 3000 = 0.3%)
     uint24 public immutable poolFee;
 
+    /// @notice Transient flag to verify callback originates from this contract's swap
+    bool private transient _swapInitiated;
+
     // ============ Modifiers ============
 
     /// @notice Ensures transaction is executed before deadline
     modifier checkDeadline(uint256 deadline) {
         if (deadline < block.timestamp) revert RouterDeadlineExpired();
+        _;
+    }
+
+    /// @notice Sets flag to authorize the Uniswap callback
+    modifier initiateSwap() {
+        _swapInitiated = true;
         _;
     }
 
@@ -97,7 +107,6 @@ contract Router is IRouter, IUniswapV3SwapCallback {
 
         IERC20(uaAddress).forceApprove(address(swapRouter), uaIn);
 
-        // Swap UA for senior tokens on Uniswap V3
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: uaAddress,
             tokenOut: srAddress,
@@ -135,7 +144,6 @@ contract Router is IRouter, IUniswapV3SwapCallback {
 
         IERC20(srAddress).forceApprove(address(swapRouter), srIn);
 
-        // Swap senior tokens for UA on Uniswap V3
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: srAddress,
             tokenOut: uaAddress,
@@ -150,6 +158,49 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         uaOut = swapRouter.exactInputSingle(params);
 
         emit SellSenior(msg.sender, srIn, uaOut);
+    }
+
+    /**
+     * @notice Buy junior tranche tokens by depositing UA
+     * @dev Flash swap strategy:
+     *      1. Transfer UA from user
+     *      2. Initiate flash swap to borrow UA from Uniswap pool
+     *      3. In callback: Tranche (user UA + borrowed UA) into Senior + Junior
+     *      4. In callback: Swap Senior tokens for UA to repay flash loan
+     *      5. In callback: Send Junior tokens to user
+     * @param uaIn Amount of UA to deposit
+     * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
+     * @param deadline Transaction deadline timestamp
+     */
+    function buyJunior(
+        uint256 uaIn,
+        uint256 minJrOut,
+        uint256 deadline
+    ) external override checkDeadline(deadline) initiateSwap {
+        if (uaIn == 0) revert Errors.TrancheZeroAmount();
+
+        (address uaAddress, address srAddress, ) = trancheMarket.getSwapParameters();
+
+        // Transfer user's UA to contract
+        IERC20(uaAddress).safeTransferFrom(msg.sender, address(this), uaIn);
+
+        // Calculate UA to borrow: we need enough to tranche and get SR to repay
+        (uint256 expectedSrOut, ) = trancheMarket.previewTranche(uaIn);
+        uint256 uaToBorrow = calculateUnderlyingNeeded(expectedSrOut);
+
+        // Initiate flash swap to borrow UA from pool
+        bool uaIsToken0 = uaAddress < srAddress;
+        bool zeroForOne = !uaIsToken0;
+
+        bytes memory data = abi.encode(msg.sender, uaIn, minJrOut, SwapOperation.BUY_JUNIOR);
+
+        uniswapPool.swap({
+            recipient: address(this),
+            zeroForOne: zeroForOne,
+            amountSpecified: -int256(uaToBorrow),
+            sqrtPriceLimitX96: zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
+            data: data
+        });
     }
 
     /**
@@ -168,15 +219,18 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         uint256 jrIn,
         uint256 minUaOut,
         uint256 deadline
-    ) external override checkDeadline(deadline) {
+    ) external override checkDeadline(deadline) initiateSwap {
         if (jrIn == 0) revert Errors.TrancheZeroAmount();
 
         (address uaAddress, address srAddress, address jrAddress) = trancheMarket.getSwapParameters();
 
+        // Transfer user's JR to contract
         IERC20(jrAddress).safeTransferFrom(msg.sender, address(this), jrIn);
 
+        // Calculate SR needed to match JR for recombination
         uint256 srNeeded = calculateSeniorNeeded(jrIn);
 
+        // Initiate flash swap to borrow SR from pool
         bool zeroForOne = uaAddress < srAddress;
         bytes memory data = abi.encode(msg.sender, jrIn, minUaOut, SwapOperation.SELL_JUNIOR);
 
@@ -184,6 +238,89 @@ contract Router is IRouter, IUniswapV3SwapCallback {
             recipient: address(this),
             zeroForOne: zeroForOne,
             amountSpecified: -int256(srNeeded),
+            sqrtPriceLimitX96: zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
+            data: data
+        });
+    }
+
+    /**
+     * @notice Swap junior tranche tokens for senior tranche tokens
+     * @dev Flash swap strategy:
+     *      1. Transfer junior tokens from user
+     *      2. Initiate flash swap to borrow SR tokens from Uniswap pool
+     *      3. In callback: Redeem SR + JR for UA via TrancheMarket
+     *      4. In callback: Swap all UA for SR tokens
+     *      5. In callback: Repay borrowed SR to pool
+     *      6. In callback: Send remaining SR to user
+     * @param jrIn Amount of junior tokens to swap
+     * @param minSrOut Minimum amount of senior tokens to receive (slippage protection)
+     * @param deadline Transaction deadline timestamp
+     */
+    function swapJuniorToSenior(
+        uint256 jrIn,
+        uint256 minSrOut,
+        uint256 deadline
+    ) external override checkDeadline(deadline) initiateSwap {
+        if (jrIn == 0) revert Errors.TrancheZeroAmount();
+
+        (address uaAddress, address srAddress, address jrAddress) = trancheMarket.getSwapParameters();
+
+        // Transfer user's JR to contract
+        IERC20(jrAddress).safeTransferFrom(msg.sender, address(this), jrIn);
+
+        // Calculate SR needed to match JR for recombination
+        uint256 srNeeded = calculateSeniorNeeded(jrIn);
+
+        // Initiate flash swap to borrow SR from pool
+        bool zeroForOne = uaAddress < srAddress;
+        bytes memory data = abi.encode(msg.sender, jrIn, minSrOut, SwapOperation.SWAP_JUNIOR_TO_SENIOR);
+
+        uniswapPool.swap({
+            recipient: address(this),
+            zeroForOne: zeroForOne,
+            amountSpecified: -int256(srNeeded),
+            sqrtPriceLimitX96: zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
+            data: data
+        });
+    }
+
+    /**
+     * @notice Swap senior tranche tokens for junior tranche tokens
+     * @dev Flash swap strategy:
+     *      1. Transfer senior tokens from user
+     *      2. Initiate flash swap to borrow UA from Uniswap pool
+     *      3. In callback: Tranche borrowed UA into SR + JR
+     *      4. In callback: Sell (user SR + minted SR) for UA to repay flash loan
+     *      5. In callback: Send minted JR to user
+     * @param srIn Amount of senior tokens to swap
+     * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
+     * @param deadline Transaction deadline timestamp
+     */
+    function swapSeniorToJunior(
+        uint256 srIn,
+        uint256 minJrOut,
+        uint256 deadline
+    ) external override checkDeadline(deadline) initiateSwap {
+        if (srIn == 0) revert Errors.TrancheZeroAmount();
+
+        (address uaAddress, address srAddress, ) = trancheMarket.getSwapParameters();
+
+        // Transfer user's SR to contract
+        IERC20(srAddress).safeTransferFrom(msg.sender, address(this), srIn);
+
+        // Calculate UA to borrow
+        uint256 uaToBorrow = calculateUnderlyingNeeded(srIn);
+
+        // Initiate flash swap to borrow UA from pool
+        bool uaIsToken0 = uaAddress < srAddress;
+        bool zeroForOne = !uaIsToken0;
+
+        bytes memory data = abi.encode(msg.sender, srIn, minJrOut, SwapOperation.SWAP_SENIOR_TO_JUNIOR);
+
+        uniswapPool.swap({
+            recipient: address(this),
+            zeroForOne: zeroForOne,
+            amountSpecified: -int256(uaToBorrow),
             sqrtPriceLimitX96: zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
             data: data
         });
@@ -201,33 +338,41 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         int256 amount1Delta,
         bytes calldata data
     ) external override {
-        if (msg.sender != address(uniswapPool)) revert RouterUnauthorizedCallback();
+        if (msg.sender != address(uniswapPool) || !_swapInitiated) revert RouterUnauthorizedCallback();
+        _swapInitiated = false;
 
-        (address user, uint256 jrIn, uint256 minUaOut, SwapOperation operation) = abi.decode(
+        (address user, uint256 amount, uint256 minOut, SwapOperation operation) = abi.decode(
             data,
             (address, uint256, uint256, SwapOperation)
         );
 
         (address uaAddress, address srAddress, address jrAddress) = trancheMarket.getSwapParameters();
-
         bool uaIsToken0 = uaAddress < srAddress;
 
-        // Operation handler
         if (operation == SwapOperation.SELL_JUNIOR) {
+            (uint256 jrIn, uint256 minUaOut) = (amount, minOut);
 
-            // Extract SR borrowed amount based on token ordering (negative delta = received from pool)
             uint256 srBorrowed = uaIsToken0 ? uint256(-amount1Delta) : uint256(-amount0Delta);
 
             _handleSellJunior(user, jrIn, minUaOut, srBorrowed, uaAddress, srAddress, jrAddress);
         } else if (operation == SwapOperation.BUY_JUNIOR) {
-            // TODO: Implement buy junior with leverage
-            revert("BUY_JUNIOR not implemented yet");
+            (uint256 uaIn, uint256 minJrOut) = (amount, minOut);
+
+            uint256 uaBorrowed = uaIsToken0 ? uint256(-amount0Delta) : uint256(-amount1Delta);
+            
+            _handleBuyJunior(user, uaIn, minJrOut, uaBorrowed, uaAddress, srAddress, jrAddress);
         } else if (operation == SwapOperation.SWAP_JUNIOR_TO_SENIOR) {
-            // TODO: Implement junior to senior swap
-            revert("SWAP_JUNIOR_TO_SENIOR not implemented yet");
+            (uint256 jrIn, uint256 minSrOut) = (amount, minOut);
+
+            uint256 srBorrowed = uaIsToken0 ? uint256(-amount1Delta) : uint256(-amount0Delta);
+
+            _handleSwapJuniorToSenior(user, jrIn, minSrOut, srBorrowed, uaAddress, srAddress, jrAddress);
         } else if (operation == SwapOperation.SWAP_SENIOR_TO_JUNIOR) {
-            // TODO: Implement senior to junior swap
-            revert("SWAP_SENIOR_TO_JUNIOR not implemented yet");
+            (uint256 srIn, uint256 minJrOut) = (amount, minOut);
+
+            uint256 uaBorrowed = uaIsToken0 ? uint256(-amount0Delta) : uint256(-amount1Delta);
+
+            _handleSwapSeniorToJunior(user, srIn, minJrOut, uaBorrowed, uaAddress, srAddress, jrAddress);
         }
     }
 
@@ -246,11 +391,13 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         address srAddress,
         address jrAddress
     ) internal {
+        // Recombine borrowed SR + user's JR into UA
         IERC20(srAddress).forceApprove(address(trancheMarket), srBorrowed);
         IERC20(jrAddress).forceApprove(address(trancheMarket), jrIn);
-
+        
         uint256 uaReceived = trancheMarket.recombine(srBorrowed, jrIn, address(this));
 
+        // Buy SR with UA to repay flash loan
         IERC20(uaAddress).forceApprove(address(swapRouter), uaReceived);
 
         ISwapRouter.ExactOutputSingleParams memory swapParams = ISwapRouter.ExactOutputSingleParams({
@@ -259,20 +406,166 @@ contract Router is IRouter, IUniswapV3SwapCallback {
             fee: poolFee,
             recipient: address(this),
             deadline: block.timestamp,
-            amountOut: srBorrowed, // Exact amount of SR we need to return
-            amountInMaximum: uaReceived, // Maximum UA we're willing to spend
+            amountOut: srBorrowed,
+            amountInMaximum: uaReceived,
             sqrtPriceLimitX96: 0
         });
 
         uint256 uaSpentOnSwap = swapRouter.exactOutputSingle(swapParams);
 
+        // Send remaining UA profit to user
         uint256 uaToUser = uaReceived - uaSpentOnSwap;
         if (uaToUser < minUaOut) revert InsufficientOutput();
 
+        // Repay flash loan and send UA to user
         IERC20(srAddress).safeTransfer(msg.sender, srBorrowed);
         IERC20(uaAddress).safeTransfer(user, uaToUser);
 
         emit SellJunior(user, jrIn, uaToUser);
+    }
+
+    /**
+     * @notice Internal function to handle buying junior tokens via flash swap
+     * @param user Address to receive junior tokens
+     * @param uaIn UA provided by user (already in contract)
+     * @param minJrOut Minimum junior tokens to receive
+     * @param uaBorrowed UA borrowed from flash swap
+     * @dev Called from uniswapV3SwapCallback for BUY_JUNIOR operation
+     */
+    function _handleBuyJunior(
+        address user,
+        uint256 uaIn,
+        uint256 minJrOut,
+        uint256 uaBorrowed,
+        address uaAddress,
+        address srAddress,
+        address jrAddress
+    ) internal {
+        // Tranche (user UA + borrowed UA) into SR + JR
+        uint256 totalUa = uaIn + uaBorrowed;
+
+        IERC20(uaAddress).forceApprove(address(trancheMarket), totalUa);
+        (uint256 srMinted, uint256 jrMinted) = trancheMarket.tranche(totalUa, address(this));
+
+        // Sell SR for UA to repay flash loan
+        IERC20(srAddress).forceApprove(address(swapRouter), srMinted);
+
+        ISwapRouter.ExactOutputSingleParams memory swapParams = ISwapRouter.ExactOutputSingleParams({
+            tokenIn: srAddress,
+            tokenOut: uaAddress,
+            fee: poolFee,
+            recipient: address(this),
+            deadline: block.timestamp,
+            amountOut: uaBorrowed,
+            amountInMaximum: srMinted,
+            sqrtPriceLimitX96: 0
+        });
+
+        // TODO: dust amount can remain in contract
+        swapRouter.exactOutputSingle(swapParams);
+
+        // Repay flash loan and send JR to user
+        IERC20(uaAddress).safeTransfer(msg.sender, uaBorrowed);
+
+        if (jrMinted < minJrOut) revert InsufficientOutput();
+        IERC20(jrAddress).safeTransfer(user, jrMinted);
+
+        emit BuyJunior(user, uaIn, jrMinted);
+    }
+
+    /**
+     * @notice Internal function to handle swapping junior tokens to senior tokens via flash swap
+     * @param user Address to receive senior tokens
+     * @param jrIn Junior tokens provided by user (already in contract)
+     * @param minSrOut Minimum senior tokens to receive
+     * @param srBorrowed Senior tokens borrowed from flash swap
+     * @dev Called from uniswapV3SwapCallback for SWAP_JUNIOR_TO_SENIOR operation
+     */
+    function _handleSwapJuniorToSenior(
+        address user,
+        uint256 jrIn,
+        uint256 minSrOut,
+        uint256 srBorrowed,
+        address uaAddress,
+        address srAddress,
+        address jrAddress
+    ) internal {
+        // Recombine borrowed SR + user's JR into UA
+        IERC20(srAddress).forceApprove(address(trancheMarket), srBorrowed);
+        IERC20(jrAddress).forceApprove(address(trancheMarket), jrIn);
+       
+        uint256 uaReceived = trancheMarket.recombine(srBorrowed, jrIn, address(this));
+
+        // Swap all UA for SR
+        IERC20(uaAddress).forceApprove(address(swapRouter), uaReceived);
+
+        ISwapRouter.ExactInputSingleParams memory swapParams = ISwapRouter.ExactInputSingleParams({
+            tokenIn: uaAddress,
+            tokenOut: srAddress,
+            fee: poolFee,
+            recipient: address(this),
+            deadline: block.timestamp,
+            amountIn: uaReceived,
+            amountOutMinimum: srBorrowed,
+            sqrtPriceLimitX96: 0
+        });
+
+        uint256 srReceived = swapRouter.exactInputSingle(swapParams);
+
+        // Repay borrowed SR to pool
+        IERC20(srAddress).safeTransfer(msg.sender, srBorrowed);
+
+        // Send remaining SR profit to user
+        uint256 srToUser = srReceived - srBorrowed;
+        if (srToUser < minSrOut) revert InsufficientOutput();
+
+        IERC20(srAddress).safeTransfer(user, srToUser);
+
+        emit SwapJuniorToSenior(user, jrIn, srToUser);
+    }
+
+    /**
+     * @notice Internal function to handle swapping senior tokens to junior tokens via flash swap
+     */
+    function _handleSwapSeniorToJunior(
+        address user,
+        uint256 srIn,
+        uint256 minJrOut,
+        uint256 uaBorrowed,
+        address uaAddress,
+        address srAddress,
+        address jrAddress
+    ) internal {
+        // Tranche borrowed UA into SR + JR
+        IERC20(uaAddress).forceApprove(address(trancheMarket), uaBorrowed);
+        (uint256 srMinted, uint256 jrMinted) = trancheMarket.tranche(uaBorrowed, address(this));
+
+        // Total SR = user's SR + minted SR
+        uint256 totalSr = srIn + srMinted;
+
+        // Sell SR for exactly uaBorrowed UA to repay the flash loan
+        IERC20(srAddress).forceApprove(address(swapRouter), totalSr);
+
+        ISwapRouter.ExactOutputSingleParams memory swapParams = ISwapRouter.ExactOutputSingleParams({
+            tokenIn: srAddress,
+            tokenOut: uaAddress,
+            fee: poolFee,
+            recipient: address(this),
+            deadline: block.timestamp,
+            amountOut: uaBorrowed,
+            amountInMaximum: totalSr,
+            sqrtPriceLimitX96: 0
+        });
+        
+        // TODO: dust amount can remain in contract
+        swapRouter.exactOutputSingle(swapParams);
+
+        IERC20(uaAddress).safeTransfer(msg.sender, uaBorrowed);
+
+        if (jrMinted < minJrOut) revert InsufficientOutput();
+        IERC20(jrAddress).safeTransfer(user, jrMinted);
+
+        emit SwapSeniorToJunior(user, srIn, jrMinted);
     }
 
     // ============ View Functions ============
@@ -281,5 +574,10 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         uint256 seniorRatio = trancheMarket.seniorRatio();
         uint256 juniorRatio = trancheMarket.juniorRatio();
         srNeeded = (jrAmount * seniorRatio) / juniorRatio;
+    }
+
+    function calculateUnderlyingNeeded(uint256 srAmount) public view override returns (uint256 uaNeeded) {
+        uint256 seniorRatio = trancheMarket.seniorRatio();
+        uaNeeded = (srAmount * 1e18) / seniorRatio;
     }
 }

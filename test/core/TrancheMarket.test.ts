@@ -7,6 +7,8 @@ import { TIME } from '../utils';
 
 const { parseEther, ZeroAddress } = ethers;
 
+const mulDown = (a: bigint, b: bigint): bigint => (a * b) / parseEther('1');
+
 describe('TrancheMarket', function () {
     let market: TrancheMarket;
     let ua: ERC20Mock;
@@ -30,6 +32,9 @@ describe('TrancheMarket', function () {
         priceFeed: oracleAddress,
         seniorFloor: parseEther('0.0033'), // 0.33%
         seniorTarget: parseEther('0.005'), // 0.5%
+        liquidationEnabled: false,
+        liquidationBuffer: 0n,
+        liquidationReward: 0n,
     });
 
     async function deployFixture() {
@@ -555,8 +560,6 @@ describe('TrancheMarket', function () {
     });
 
     context('invariant: no over-distribution', function () {
-        const mulDown = (a: bigint, b: bigint): bigint => (a * b) / ONE;
-
         it('Should not over-distribute across various price scenarios', async function () {
             const prices = [
                 50000000n, // $0.50
@@ -603,6 +606,840 @@ describe('TrancheMarket', function () {
 
                 expect(totalDistributed).to.be.lte(uaQuantity, `Over-distribution at price ${price}`);
             }
+        });
+    });
+
+    describe('liquidation', function () {
+        const liquidationMarketParams = async (
+            uaAddress: string,
+            oracleAddress: string,
+            adminAddress: string,
+            expiryOffset: number = TIME.MONTH
+        ) => ({
+            ua: uaAddress,
+            expiry: (await time.latest()) + expiryOffset,
+            seniorRatio: parseEther('0.8'),
+            admin: adminAddress,
+            priceFeed: oracleAddress,
+            seniorFloor: parseEther('0.005'), // 0.5%
+            seniorTarget: parseEther('0.01'), // 1%
+            liquidationEnabled: true,
+            liquidationBuffer: parseEther('0.025'), // 2.5%
+            liquidationReward: parseEther('0.025'), // 2.5%
+        });
+
+        async function deployLiquidationFixture() {
+            const [admin, user, other] = await ethers.getSigners();
+
+            const ERC20MockFactory = await ethers.getContractFactory('ERC20Mock');
+            const ua = await ERC20MockFactory.deploy('Underlying Asset', 'UA');
+            await ua.waitForDeployment();
+
+            const MockOracleFactory = await ethers.getContractFactory('MockChainlinkAggregator');
+            const oracle = await MockOracleFactory.deploy(8, 'UA / USD');
+            await oracle.waitForDeployment();
+
+            await oracle.setRoundData(100000000n, await time.latest());
+
+            const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+            const params = await liquidationMarketParams(
+                await ua.getAddress(),
+                await oracle.getAddress(),
+                admin.address
+            );
+            const market = await MarketFactory.deploy(params);
+            await market.waitForDeployment();
+
+            await ua.mint(user.address, parseEther('1000'));
+            await ua.connect(user).approve(await market.getAddress(), parseEther('1000'));
+
+            return { market, ua, oracle, admin, user, other };
+        }
+
+        async function deployLiquidationWithTrancheFixture() {
+            const base = await deployLiquidationFixture();
+            await base.market.connect(base.user).tranche(parseEther('100'), base.user.address);
+            return base;
+        }
+
+        describe('constructor', function () {
+            it('Should deploy with liquidation enabled', async function () {
+                const { market } = await loadFixture(deployLiquidationFixture);
+                expect(await market.liquidationEnabled()).to.be.true;
+                expect(await market.liquidationBuffer()).to.equal(parseEther('0.025'));
+                expect(await market.liquidationReward()).to.equal(parseEther('0.025'));
+            });
+
+            it('Should deploy with liquidation disabled', async function () {
+                const { ua, oracle, admin } = await loadFixture(deployLiquidationFixture);
+                const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+                const params = await defaultMarketParams(
+                    await ua.getAddress(),
+                    await oracle.getAddress(),
+                    admin.address
+                );
+                const disabledMarket = await MarketFactory.deploy(params);
+
+                expect(await disabledMarket.liquidationEnabled()).to.be.false;
+                expect(await disabledMarket.liquidationPrice()).to.equal(0n);
+            });
+
+            it('Should calculate correct liquidation price', async function () {
+                const { market } = await loadFixture(deployLiquidationFixture);
+
+                const initialPrice = await market.initialPrice();
+                const seniorRatio = await market.seniorRatio();
+                const juniorRatio = await market.juniorRatio();
+                const seniorFloor = await market.seniorFloor();
+                const buffer = await market.liquidationBuffer();
+                const reward = await market.liquidationReward();
+
+                const expectedLiqPrice = mulDown(
+                    initialPrice,
+                    mulDown(seniorRatio, ONE + seniorFloor) + mulDown(juniorRatio, buffer + reward)
+                );
+
+                expect(await market.liquidationPrice()).to.equal(expectedLiqPrice);
+            });
+
+            it('Should accept zero buffer and reward', async function () {
+                const { ua, oracle, admin } = await loadFixture(deployLiquidationFixture);
+                const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+                const params = {
+                    ua: await ua.getAddress(),
+                    expiry: (await time.latest()) + TIME.MONTH,
+                    seniorRatio: parseEther('0.8'),
+                    admin: admin.address,
+                    priceFeed: await oracle.getAddress(),
+                    seniorFloor: parseEther('0.005'),
+                    seniorTarget: parseEther('0.01'),
+                    liquidationEnabled: true,
+                    liquidationBuffer: 0n,
+                    liquidationReward: 0n,
+                };
+                const zeroParamMarket = await MarketFactory.deploy(params);
+
+                expect(await zeroParamMarket.liquidationBuffer()).to.equal(0n);
+                expect(await zeroParamMarket.liquidationReward()).to.equal(0n);
+                expect(await zeroParamMarket.liquidationPrice()).to.be.gt(0n);
+            });
+
+            it('Should accept max buffer (2.5%)', async function () {
+                const { ua, oracle, admin } = await loadFixture(deployLiquidationFixture);
+                const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+                const params = {
+                    ua: await ua.getAddress(),
+                    expiry: (await time.latest()) + TIME.MONTH,
+                    seniorRatio: parseEther('0.8'),
+                    admin: admin.address,
+                    priceFeed: await oracle.getAddress(),
+                    seniorFloor: parseEther('0.005'),
+                    seniorTarget: parseEther('0.01'),
+                    liquidationEnabled: true,
+                    liquidationBuffer: parseEther('0.025'),
+                    liquidationReward: 0n,
+                };
+                const maxBufferMarket = await MarketFactory.deploy(params);
+                expect(await maxBufferMarket.liquidationBuffer()).to.equal(parseEther('0.025'));
+            });
+
+            it('Should accept max reward (2.5%)', async function () {
+                const { ua, oracle, admin } = await loadFixture(deployLiquidationFixture);
+                const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+                const params = {
+                    ua: await ua.getAddress(),
+                    expiry: (await time.latest()) + TIME.MONTH,
+                    seniorRatio: parseEther('0.8'),
+                    admin: admin.address,
+                    priceFeed: await oracle.getAddress(),
+                    seniorFloor: parseEther('0.005'),
+                    seniorTarget: parseEther('0.01'),
+                    liquidationEnabled: true,
+                    liquidationBuffer: 0n,
+                    liquidationReward: parseEther('0.025'),
+                };
+                const maxRewardMarket = await MarketFactory.deploy(params);
+                expect(await maxRewardMarket.liquidationReward()).to.equal(parseEther('0.025'));
+            });
+
+            context('Revert reasons', function () {
+                it('Reverts when buffer exceeds 2.5%', async function () {
+                    const { ua, oracle, admin, market } = await loadFixture(deployLiquidationFixture);
+                    const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+                    const params = {
+                        ua: await ua.getAddress(),
+                        expiry: (await time.latest()) + TIME.MONTH,
+                        seniorRatio: parseEther('0.8'),
+                        admin: admin.address,
+                        priceFeed: await oracle.getAddress(),
+                        seniorFloor: parseEther('0.005'),
+                        seniorTarget: parseEther('0.01'),
+                        liquidationEnabled: true,
+                        liquidationBuffer: parseEther('0.026'),
+                        liquidationReward: 0n,
+                    };
+
+                    await expect(MarketFactory.deploy(params)).to.be.revertedWithCustomError(
+                        market,
+                        'LiquidationInvalidBuffer'
+                    );
+                });
+
+                it('Reverts when reward exceeds 2.5%', async function () {
+                    const { ua, oracle, admin, market } = await loadFixture(deployLiquidationFixture);
+                    const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+                    const params = {
+                        ua: await ua.getAddress(),
+                        expiry: (await time.latest()) + TIME.MONTH,
+                        seniorRatio: parseEther('0.8'),
+                        admin: admin.address,
+                        priceFeed: await oracle.getAddress(),
+                        seniorFloor: parseEther('0.005'),
+                        seniorTarget: parseEther('0.01'),
+                        liquidationEnabled: true,
+                        liquidationBuffer: 0n,
+                        liquidationReward: parseEther('0.026'),
+                    };
+
+                    await expect(MarketFactory.deploy(params)).to.be.revertedWithCustomError(
+                        market,
+                        'LiquidationInvalidReward'
+                    );
+                });
+            });
+        });
+
+        describe('liquidate', function () {
+            it('Should liquidate when price below threshold', async function () {
+                const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                const tx = await market.connect(admin).liquidate();
+
+                await expect(tx).to.emit(market, 'Liquidate');
+                expect(await market.finalized()).to.be.true;
+            });
+
+            it('Should set jrRateUA to 0', async function () {
+                const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                await market.connect(admin).liquidate();
+                expect(await market.jrRateUA()).to.equal(0n);
+            });
+
+            it('Should transfer reward to admin', async function () {
+                const { market, ua, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                const jrToken = await ethers.getContractAt('TrancheToken', await market.jrToken());
+                const jrSupply = await jrToken.totalSupply();
+                const rewardRate = await market.liquidationReward();
+                const expectedReward = mulDown(jrSupply, rewardRate);
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                const adminBalanceBefore = await ua.balanceOf(admin.address);
+                await market.connect(admin).liquidate();
+                const adminBalanceAfter = await ua.balanceOf(admin.address);
+
+                expect(adminBalanceAfter - adminBalanceBefore).to.equal(expectedReward);
+            });
+
+            it('Should calculate correct srRateUA', async function () {
+                const { market, ua, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                const uaQuantity = await ua.balanceOf(await market.getAddress());
+                const srToken = await ethers.getContractAt('TrancheToken', await market.srToken());
+                const jrToken = await ethers.getContractAt('TrancheToken', await market.jrToken());
+                const srSupply = await srToken.totalSupply();
+                const jrSupply = await jrToken.totalSupply();
+                const rewardRate = await market.liquidationReward();
+                const liquidatorReward = mulDown(jrSupply, rewardRate);
+                const remainingUA = uaQuantity - liquidatorReward;
+                const expectedSrRate = (remainingUA * ONE) / srSupply;
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                await market.connect(admin).liquidate();
+                expect(await market.srRateUA()).to.equal(expectedSrRate);
+            });
+
+            it('Should emit Liquidate event', async function () {
+                const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                const tx = await market.connect(admin).liquidate();
+                await expect(tx)
+                    .to.emit(market, 'Liquidate')
+                    .withArgs(
+                        belowLiqPrice,
+                        liqPrice,
+                        await market.srRateUA(),
+                        await market.liquidationReward().then((r) => mulDown(parseEther('20'), r)),
+                        admin.address
+                    );
+            });
+
+            it('Should set finalized to true', async function () {
+                const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                expect(await market.finalized()).to.be.false;
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                await market.connect(admin).liquidate();
+                expect(await market.finalized()).to.be.true;
+            });
+
+            it('Should allow senior redemption after liquidation', async function () {
+                const { market, ua, oracle, admin, user } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                await market.connect(admin).liquidate();
+
+                const srToken = await ethers.getContractAt('TrancheToken', await market.srToken());
+                const srBalance = await srToken.balanceOf(user.address);
+                const srRate = await market.srRateUA();
+                const expectedUa = mulDown(srBalance, srRate);
+
+                const userUaBefore = await ua.balanceOf(user.address);
+                await market.connect(user).redeemSenior(srBalance, user.address);
+                const userUaAfter = await ua.balanceOf(user.address);
+
+                expect(userUaAfter - userUaBefore).to.equal(expectedUa);
+            });
+
+            it('Should give junior 0 on redemption', async function () {
+                const { market, ua, oracle, admin, user } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                await market.connect(admin).liquidate();
+
+                const jrToken = await ethers.getContractAt('TrancheToken', await market.jrToken());
+                const jrBalance = await jrToken.balanceOf(user.address);
+
+                const userUaBefore = await ua.balanceOf(user.address);
+                await market.connect(user).redeemJunior(jrBalance, user.address);
+                const userUaAfter = await ua.balanceOf(user.address);
+
+                expect(userUaAfter - userUaBefore).to.equal(0n);
+            });
+
+            context('Edge cases', function () {
+                it('Should liquidate at exact threshold price minus 1 wei', async function () {
+                    const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                    const liqPrice = await market.liquidationPrice();
+                    const justBelowLiqPrice = liqPrice - 1n;
+                    const oracle8Dec = (justBelowLiqPrice * 100000000n) / ONE;
+                    await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                    await expect(market.connect(admin).liquidate()).to.emit(market, 'Liquidate');
+                });
+
+                it('Should work with zero buffer', async function () {
+                    const { ua, oracle, admin, user } = await loadFixture(deployLiquidationFixture);
+                    const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+                    const params = {
+                        ua: await ua.getAddress(),
+                        expiry: (await time.latest()) + TIME.MONTH,
+                        seniorRatio: parseEther('0.8'),
+                        admin: admin.address,
+                        priceFeed: await oracle.getAddress(),
+                        seniorFloor: parseEther('0.005'),
+                        seniorTarget: parseEther('0.01'),
+                        liquidationEnabled: true,
+                        liquidationBuffer: 0n,
+                        liquidationReward: parseEther('0.025'),
+                    };
+                    const zeroBufferMarket = await MarketFactory.deploy(params);
+
+                    await ua.connect(user).approve(await zeroBufferMarket.getAddress(), parseEther('100'));
+                    await zeroBufferMarket.connect(user).tranche(parseEther('100'), user.address);
+
+                    const liqPrice = await zeroBufferMarket.liquidationPrice();
+                    const belowLiqPrice = (liqPrice * 99n) / 100n;
+                    const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                    await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                    await expect(zeroBufferMarket.connect(admin).liquidate()).to.emit(zeroBufferMarket, 'Liquidate');
+                });
+
+                it('Should work with zero reward', async function () {
+                    const { ua, oracle, admin, user } = await loadFixture(deployLiquidationFixture);
+                    const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+                    const params = {
+                        ua: await ua.getAddress(),
+                        expiry: (await time.latest()) + TIME.MONTH,
+                        seniorRatio: parseEther('0.8'),
+                        admin: admin.address,
+                        priceFeed: await oracle.getAddress(),
+                        seniorFloor: parseEther('0.005'),
+                        seniorTarget: parseEther('0.01'),
+                        liquidationEnabled: true,
+                        liquidationBuffer: parseEther('0.025'),
+                        liquidationReward: 0n,
+                    };
+                    const zeroRewardMarket = await MarketFactory.deploy(params);
+
+                    await ua.connect(user).approve(await zeroRewardMarket.getAddress(), parseEther('100'));
+                    await zeroRewardMarket.connect(user).tranche(parseEther('100'), user.address);
+
+                    const adminBalanceBefore = await ua.balanceOf(admin.address);
+
+                    const liqPrice = await zeroRewardMarket.liquidationPrice();
+                    const belowLiqPrice = (liqPrice * 99n) / 100n;
+                    const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                    await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                    await zeroRewardMarket.connect(admin).liquidate();
+
+                    const adminBalanceAfter = await ua.balanceOf(admin.address);
+                    expect(adminBalanceAfter).to.equal(adminBalanceBefore);
+                });
+
+                it('Should work with both zero buffer and reward', async function () {
+                    const { ua, oracle, admin, user } = await loadFixture(deployLiquidationFixture);
+                    const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+                    const params = {
+                        ua: await ua.getAddress(),
+                        expiry: (await time.latest()) + TIME.MONTH,
+                        seniorRatio: parseEther('0.8'),
+                        admin: admin.address,
+                        priceFeed: await oracle.getAddress(),
+                        seniorFloor: parseEther('0.005'),
+                        seniorTarget: parseEther('0.01'),
+                        liquidationEnabled: true,
+                        liquidationBuffer: 0n,
+                        liquidationReward: 0n,
+                    };
+                    const zeroBothMarket = await MarketFactory.deploy(params);
+
+                    await ua.connect(user).approve(await zeroBothMarket.getAddress(), parseEther('100'));
+                    await zeroBothMarket.connect(user).tranche(parseEther('100'), user.address);
+
+                    const liqPrice = await zeroBothMarket.liquidationPrice();
+                    const belowLiqPrice = (liqPrice * 99n) / 100n;
+                    const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                    await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                    await expect(zeroBothMarket.connect(admin).liquidate()).to.emit(zeroBothMarket, 'Liquidate');
+                });
+
+                it('Should handle 6 decimal oracle', async function () {
+                    const { ua, admin, user } = await loadFixture(deployLiquidationFixture);
+                    const MockOracleFactory = await ethers.getContractFactory('MockChainlinkAggregator');
+                    const oracle6 = await MockOracleFactory.deploy(6, 'UA / USD');
+                    await oracle6.setRoundData(1000000n, await time.latest());
+
+                    const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+                    const params = {
+                        ua: await ua.getAddress(),
+                        expiry: (await time.latest()) + TIME.MONTH,
+                        seniorRatio: parseEther('0.8'),
+                        admin: admin.address,
+                        priceFeed: await oracle6.getAddress(),
+                        seniorFloor: parseEther('0.005'),
+                        seniorTarget: parseEther('0.01'),
+                        liquidationEnabled: true,
+                        liquidationBuffer: parseEther('0.025'),
+                        liquidationReward: parseEther('0.025'),
+                    };
+                    const market6 = await MarketFactory.deploy(params);
+
+                    await ua.connect(user).approve(await market6.getAddress(), parseEther('100'));
+                    await market6.connect(user).tranche(parseEther('100'), user.address);
+
+                    const liqPrice = await market6.liquidationPrice();
+                    const belowLiqPrice = (liqPrice * 99n) / 100n;
+                    const oracle6Dec = (belowLiqPrice * 1000000n) / ONE;
+                    await oracle6.setRoundData(oracle6Dec, await time.latest());
+
+                    await expect(market6.connect(admin).liquidate()).to.emit(market6, 'Liquidate');
+                });
+
+                it('Should handle 8 decimal oracle', async function () {
+                    const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                    const liqPrice = await market.liquidationPrice();
+                    const belowLiqPrice = (liqPrice * 99n) / 100n;
+                    const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                    await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                    await expect(market.connect(admin).liquidate()).to.emit(market, 'Liquidate');
+                });
+
+                it('Should handle 18 decimal oracle', async function () {
+                    const { ua, admin, user } = await loadFixture(deployLiquidationFixture);
+                    const MockOracleFactory = await ethers.getContractFactory('MockChainlinkAggregator');
+                    const oracle18 = await MockOracleFactory.deploy(18, 'UA / USD');
+                    await oracle18.setRoundData(parseEther('1'), await time.latest());
+
+                    const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+                    const params = {
+                        ua: await ua.getAddress(),
+                        expiry: (await time.latest()) + TIME.MONTH,
+                        seniorRatio: parseEther('0.8'),
+                        admin: admin.address,
+                        priceFeed: await oracle18.getAddress(),
+                        seniorFloor: parseEther('0.005'),
+                        seniorTarget: parseEther('0.01'),
+                        liquidationEnabled: true,
+                        liquidationBuffer: parseEther('0.025'),
+                        liquidationReward: parseEther('0.025'),
+                    };
+                    const market18 = await MarketFactory.deploy(params);
+
+                    await ua.connect(user).approve(await market18.getAddress(), parseEther('100'));
+                    await market18.connect(user).tranche(parseEther('100'), user.address);
+
+                    const liqPrice = await market18.liquidationPrice();
+                    const belowLiqPrice = (liqPrice * 99n) / 100n;
+                    await oracle18.setRoundData(belowLiqPrice, await time.latest());
+
+                    await expect(market18.connect(admin).liquidate()).to.emit(market18, 'Liquidate');
+                });
+            });
+
+            context('Revert reasons', function () {
+                it('Reverts when liquidation not enabled', async function () {
+                    const { ua, oracle, admin, user } = await loadFixture(deployLiquidationFixture);
+                    const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+                    const params = await defaultMarketParams(
+                        await ua.getAddress(),
+                        await oracle.getAddress(),
+                        admin.address
+                    );
+                    const disabledMarket = await MarketFactory.deploy(params);
+
+                    await ua.connect(user).approve(await disabledMarket.getAddress(), parseEther('100'));
+                    await disabledMarket.connect(user).tranche(parseEther('100'), user.address);
+
+                    await oracle.setRoundData(50000000n, await time.latest());
+
+                    await expect(disabledMarket.connect(admin).liquidate()).to.be.revertedWithCustomError(
+                        disabledMarket,
+                        'LiquidationNotEnabled'
+                    );
+                });
+
+                it('Reverts when price above threshold', async function () {
+                    const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                    await oracle.setRoundData(100000000n, await time.latest());
+
+                    await expect(market.connect(admin).liquidate()).to.be.revertedWithCustomError(
+                        market,
+                        'LiquidationConditionNotMet'
+                    );
+                });
+
+                it('Reverts when price exactly at threshold', async function () {
+                    const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                    const liqPrice = await market.liquidationPrice();
+                    const oracle8Dec = (liqPrice * 100000000n) / ONE;
+                    await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                    await expect(market.connect(admin).liquidate()).to.be.revertedWithCustomError(
+                        market,
+                        'LiquidationConditionNotMet'
+                    );
+                });
+
+                it('Reverts when called after expiry', async function () {
+                    const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                    await time.increase(TIME.MONTH + 1);
+
+                    const liqPrice = await market.liquidationPrice();
+                    const belowLiqPrice = (liqPrice * 99n) / 100n;
+                    const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                    await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                    await expect(market.connect(admin).liquidate()).to.be.revertedWithCustomError(
+                        market,
+                        'LiquidationAfterExpiry'
+                    );
+                });
+
+                it('Reverts when already finalized', async function () {
+                    const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+                    await time.increase(TIME.MONTH + 1);
+                    await oracle.setRoundData(100000000n, await time.latest());
+                    await market.connect(admin).finalize(parseEther('1'), parseEther('0.01'));
+
+                    await expect(market.connect(admin).liquidate()).to.be.revertedWithCustomError(
+                        market,
+                        'LiquidationAfterExpiry'
+                    );
+                });
+
+                it('Reverts when already liquidated', async function () {
+                    const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                    const liqPrice = await market.liquidationPrice();
+                    const belowLiqPrice = (liqPrice * 99n) / 100n;
+                    const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                    await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                    await market.connect(admin).liquidate();
+
+                    await expect(market.connect(admin).liquidate()).to.be.revertedWithCustomError(
+                        market,
+                        'TrancheMarketAlreadyFinalized'
+                    );
+                });
+
+                it('Reverts when called by non-admin', async function () {
+                    const { market, oracle, other } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                    const liqPrice = await market.liquidationPrice();
+                    const belowLiqPrice = (liqPrice * 99n) / 100n;
+                    const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                    await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                    await expect(market.connect(other).liquidate()).to.be.revertedWithCustomError(market, 'OnlyAdmin');
+                });
+
+                it('Reverts when oracle price is stale', async function () {
+                    const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                    const liqPrice = await market.liquidationPrice();
+                    const belowLiqPrice = (liqPrice * 99n) / 100n;
+                    const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                    const currentTime = await time.latest();
+                    await oracle.setRoundData(oracle8Dec, currentTime - 25 * 60 * 60);
+
+                    await expect(market.connect(admin).liquidate()).to.be.revertedWithCustomError(
+                        market,
+                        'OracleStalePrice'
+                    );
+                });
+
+                it('Reverts when oracle price is invalid', async function () {
+                    const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                    await oracle.setRoundData(0, await time.latest());
+
+                    await expect(market.connect(admin).liquidate()).to.be.revertedWithCustomError(
+                        market,
+                        'OracleInvalidPrice'
+                    );
+                });
+
+                it('Reverts when no UA in contract', async function () {
+                    const { market, oracle, admin } = await loadFixture(deployLiquidationFixture);
+
+                    const liqPrice = await market.liquidationPrice();
+                    const belowLiqPrice = (liqPrice * 99n) / 100n;
+                    const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                    await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                    await expect(market.connect(admin).liquidate()).to.be.revertedWithCustomError(
+                        market,
+                        'SettlementZeroQuantity'
+                    );
+                });
+
+                it('Reverts finalize() after liquidation', async function () {
+                    const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                    const liqPrice = await market.liquidationPrice();
+                    const belowLiqPrice = (liqPrice * 99n) / 100n;
+                    const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                    await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                    await market.connect(admin).liquidate();
+
+                    await time.increase(TIME.MONTH + 1);
+                    await oracle.setRoundData(100000000n, await time.latest());
+
+                    await expect(
+                        market.connect(admin).finalize(parseEther('1'), parseEther('0.01'))
+                    ).to.be.revertedWithCustomError(market, 'TrancheMarketAlreadyFinalized');
+                });
+
+                it('Reverts liquidate() after finalize()', async function () {
+                    const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                    await time.increase(TIME.MONTH + 1);
+                    await oracle.setRoundData(100000000n, await time.latest());
+                    await market.connect(admin).finalize(parseEther('1'), parseEther('0.01'));
+
+                    await expect(market.connect(admin).liquidate()).to.be.revertedWithCustomError(
+                        market,
+                        'LiquidationAfterExpiry'
+                    );
+                });
+            });
+        });
+
+        describe('previewLiquidation', function () {
+            it('Should return canLiquidate=true when conditions met', async function () {
+                const { market, oracle } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                const [canLiquidate] = await market.previewLiquidation();
+                expect(canLiquidate).to.be.true;
+            });
+
+            it('Should return canLiquidate=false when price above', async function () {
+                const { market, oracle } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                await oracle.setRoundData(100000000n, await time.latest());
+
+                const [canLiquidate] = await market.previewLiquidation();
+                expect(canLiquidate).to.be.false;
+            });
+
+            it('Should return canLiquidate=false after expiry', async function () {
+                const { market, oracle } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                await time.increase(TIME.MONTH + 1);
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                const [canLiquidate] = await market.previewLiquidation();
+                expect(canLiquidate).to.be.false;
+            });
+
+            it('Should return canLiquidate=false when disabled', async function () {
+                const { ua, oracle, admin, user } = await loadFixture(deployLiquidationFixture);
+                const MarketFactory = await ethers.getContractFactory('TrancheMarket');
+                const params = await defaultMarketParams(
+                    await ua.getAddress(),
+                    await oracle.getAddress(),
+                    admin.address
+                );
+                const disabledMarket = await MarketFactory.deploy(params);
+
+                await ua.connect(user).approve(await disabledMarket.getAddress(), parseEther('100'));
+                await disabledMarket.connect(user).tranche(parseEther('100'), user.address);
+
+                await oracle.setRoundData(50000000n, await time.latest());
+
+                const [canLiquidate] = await disabledMarket.previewLiquidation();
+                expect(canLiquidate).to.be.false;
+            });
+
+            it('Should return correct liquidator reward preview', async function () {
+                const { market, oracle } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                const jrToken = await ethers.getContractAt('TrancheToken', await market.jrToken());
+                const jrSupply = await jrToken.totalSupply();
+                const rewardRate = await market.liquidationReward();
+                const expectedReward = mulDown(jrSupply, rewardRate);
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                const [, , , , liquidatorReward] = await market.previewLiquidation();
+                expect(liquidatorReward).to.equal(expectedReward);
+            });
+
+            it('Should return correct srRateUA preview', async function () {
+                const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                const [, , , previewSrRate] = await market.previewLiquidation();
+
+                await market.connect(admin).liquidate();
+
+                expect(await market.srRateUA()).to.equal(previewSrRate);
+            });
+        });
+
+        describe('invariants', function () {
+            it('Should not over-distribute on liquidation', async function () {
+                const { market, ua, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                const uaQuantityBefore = await ua.balanceOf(await market.getAddress());
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                await market.connect(admin).liquidate();
+
+                const srToken = await ethers.getContractAt('TrancheToken', await market.srToken());
+                const jrToken = await ethers.getContractAt('TrancheToken', await market.jrToken());
+                const srSupply = await srToken.totalSupply();
+                const jrSupply = await jrToken.totalSupply();
+                const srRate = await market.srRateUA();
+                const jrRate = await market.jrRateUA();
+
+                const srDistributed = mulDown(srSupply, srRate);
+                const jrDistributed = mulDown(jrSupply, jrRate);
+                const adminReward = await ua.balanceOf(admin.address);
+                const totalDistributed = srDistributed + jrDistributed + adminReward;
+
+                expect(totalDistributed).to.be.lte(uaQuantityBefore);
+            });
+
+            it('Senior redemption should receive >= floor value', async function () {
+                const { market, oracle, admin } = await loadFixture(deployLiquidationWithTrancheFixture);
+
+                const srToken = await ethers.getContractAt('TrancheToken', await market.srToken());
+                const srSupply = await srToken.totalSupply();
+                const seniorFloor = await market.seniorFloor();
+                const minSeniorValue = mulDown(srSupply, ONE + seniorFloor);
+
+                const liqPrice = await market.liquidationPrice();
+                const belowLiqPrice = (liqPrice * 99n) / 100n;
+                const oracle8Dec = (belowLiqPrice * 100000000n) / ONE;
+                await oracle.setRoundData(oracle8Dec, await time.latest());
+
+                await market.connect(admin).liquidate();
+
+                const srRate = await market.srRateUA();
+                const seniorTotalValue = mulDown(srSupply, srRate);
+
+                expect(seniorTotalValue).to.be.gte(minSeniorValue - 1n);
+            });
         });
     });
 });

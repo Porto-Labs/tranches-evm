@@ -70,6 +70,22 @@ interface ITrancheMarket {
      */
     event InitialPriceSet(uint256 price);
 
+    /**
+     * @notice Emitted when the market is liquidated (premature finalization)
+     * @param oraclePrice Current price from oracle at liquidation
+     * @param liquidationPrice Threshold price that triggered liquidation
+     * @param srRateUA Senior redemption rate (UA per srUA)
+     * @param liquidatorReward Reward transferred to liquidator in UA
+     * @param triggeredBy Address that triggered the liquidation
+     */
+    event Liquidate(
+        uint256 oraclePrice,
+        uint256 liquidationPrice,
+        uint256 srRateUA,
+        uint256 liquidatorReward,
+        address indexed triggeredBy
+    );
+
     // ============ Core Functions ============
 
     /**
@@ -131,6 +147,13 @@ interface ITrancheMarket {
      */
     function setAdmin(address _newAdmin) external;
 
+    /**
+     * @notice Trigger liquidation when conditions are met (pre-maturity only)
+     * @dev Admin-only. Transfers reward to caller, sets jrRateUA to 0, finalizes market
+     * @return liquidatorReward Amount of UA transferred to liquidator
+     */
+    function liquidate() external returns (uint256 liquidatorReward);
+
     // ============ View Functions ============
 
     /// @notice Returns the Underlying Asset token address
@@ -185,7 +208,7 @@ interface ITrancheMarket {
      */
     function previewSettlement() external view returns (uint256 srRateUA, uint256 jrRateUA, uint256 oraclePrice);
 
-    /// @notice Returns swap parameters for Router in a single call
+/// @notice Returns swap parameters for Router in a single call
     /// @return uaAddress Underlying Asset token address
     /// @return srAddress Senior tranche token address
     /// @return jrAddress Junior tranche token address
@@ -201,4 +224,36 @@ interface ITrancheMarket {
      * @return jrOut Amount of junior tokens that would be minted
      */
     function previewTranche(uint256 uaIn) external view returns (uint256 srOut, uint256 jrOut);
+
+    /**
+     * @notice Preview liquidation state and potential outcomes
+     * @dev Read-only function that calculates liquidation parameters
+     * @return canLiquidate Whether liquidation conditions are currently met
+     * @return currentPrice Current oracle price (1e18 precision)
+     * @return _liquidationPrice Price threshold for liquidation (1e18 precision)
+     * @return srRateUA Projected senior redemption rate if liquidated
+     * @return liquidatorReward Projected reward for liquidator in UA
+     */
+    function previewLiquidation()
+        external
+        view
+        returns (
+            bool canLiquidate,
+            uint256 currentPrice,
+            uint256 _liquidationPrice,
+            uint256 srRateUA,
+            uint256 liquidatorReward
+        );
+
+    /// @notice Whether liquidation is enabled for this market
+    function liquidationEnabled() external view returns (bool);
+
+    /// @notice Price threshold below which liquidation can be triggered (1e18 precision)
+    function liquidationPrice() external view returns (uint256);
+
+    /// @notice Extra senior protection from junior principal (1e18 precision, max 2.5%)
+    function liquidationBuffer() external view returns (uint256);
+
+    /// @notice Reward for liquidator from junior principal (1e18 precision, max 2.5%)
+    function liquidationReward() external view returns (uint256);
 }

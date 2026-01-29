@@ -38,6 +38,9 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         address priceFeed;
         uint256 seniorFloor;
         uint256 seniorTarget;
+        bool liquidationEnabled;
+        uint256 liquidationBuffer;
+        uint256 liquidationReward;
     }
 
     // ============ Immutables ============
@@ -75,6 +78,18 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     /// @notice Price feed decimals (cached for gas efficiency)
     uint8 private immutable _priceFeedDecimals;
 
+    /// @notice Whether liquidation is enabled for this market
+    bool public immutable liquidationEnabled;
+
+    /// @notice Price threshold below which liquidation can be triggered (1e18 precision)
+    uint256 public immutable liquidationPrice;
+
+    /// @notice Extra senior protection from junior principal (1e18 precision)
+    uint256 public immutable liquidationBuffer;
+
+    /// @notice Reward for liquidator from junior principal (1e18 precision)
+    uint256 public immutable liquidationReward;
+
     // ============ Constants ============
 
     /// @notice Staleness threshold for oracle data (24 hours)
@@ -85,6 +100,9 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
 
     /// @notice one in PROTOCOL_DEFAULT_DECIMALS precision (1e18)
     uint256 private constant ONE = 1e18;
+
+    /// @notice Maximum allowed liquidation buffer/reward (2.5%)
+    uint256 private constant MAX_LIQUIDATION_PARAM = 0.025e18;
 
     // ============ State Variables ============
 
@@ -135,6 +153,21 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         initialPrice = fetchedPrice;
         seniorFloor = params.seniorFloor;
         seniorTarget = params.seniorTarget;
+
+        if (params.liquidationBuffer > MAX_LIQUIDATION_PARAM) revert Errors.LiquidationInvalidBuffer();
+        if (params.liquidationReward > MAX_LIQUIDATION_PARAM) revert Errors.LiquidationInvalidReward();
+
+        liquidationEnabled = params.liquidationEnabled;
+        liquidationBuffer = params.liquidationBuffer;
+        liquidationReward = params.liquidationReward;
+
+        if (params.liquidationEnabled) {
+            uint256 _juniorRatio = ONE - params.seniorRatio;
+            liquidationPrice = fetchedPrice.mulDown(
+                params.seniorRatio.mulDown(ONE + params.seniorFloor) +
+                    _juniorRatio.mulDown(params.liquidationBuffer + params.liquidationReward)
+            );
+        }
 
         emit InitialPriceSet(fetchedPrice);
 
@@ -197,13 +230,13 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         if (receiver == address(0)) revert Errors.ZeroAddress();
 
         // Validate ratio: srIn / seniorRatio == jrIn / juniorRatio
-        // Equivalent: srIn * juniorRatio == jrIn * seniorRatio
+        // Equivalent equation without precision loss: srIn * juniorRatio == jrIn * seniorRatio
         if (srIn.mulDown(juniorRatio) != jrIn.mulDown(seniorRatio)) revert Errors.TrancheRatioMismatch();
 
         _srTokenContract.burn(msg.sender, srIn);
         _jrTokenContract.burn(msg.sender, jrIn);
 
-        uaOut = srIn.divDown(seniorRatio); // or jrIn.divDown(juniorRatio) - same result
+        uaOut = srIn.divDown(seniorRatio);
 
         _uaToken.safeTransfer(receiver, uaOut);
 
@@ -225,10 +258,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         if (deviationThreshold > 1e18) revert Errors.OracleInvalidDeviationThreshold();
         if (referencePrice == 0) revert Errors.SettlementZeroPrice();
 
-        // Fetch and validate oracle price
         uint256 oraclePrice = _getOraclePrice();
-
-        // Validate deviation: |oracle - reference| / reference <= threshold
         uint256 deviation;
         if (oraclePrice >= referencePrice) {
             deviation = (oraclePrice - referencePrice).divDown(referencePrice);
@@ -237,7 +267,6 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         }
         if (deviation > deviationThreshold) revert Errors.OraclePriceDeviationExceeded();
 
-        // Calculate settlement rates using SettlementRatioModel
         uint256 uaQuantity = _uaToken.balanceOf(address(this));
         SettlementRatioModel.SettlementParams memory params = SettlementRatioModel.SettlementParams({
             uaQuantity: uaQuantity,
@@ -310,6 +339,41 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         emit AdminChanged(_newAdmin);
     }
 
+    // ============ Liquidation ============
+
+    /**
+     * @notice Trigger liquidation when conditions are met (pre-maturity only)
+     * @dev Admin-only. Transfers reward to caller, sets jrRateUA to 0, finalizes market
+     * @return _liquidatorReward Amount of UA transferred to liquidator
+     */
+    function liquidate() external override onlyAdmin nonReentrant returns (uint256 _liquidatorReward) {
+        if (!liquidationEnabled) revert Errors.LiquidationNotEnabled();
+        if (block.timestamp >= expiry) revert Errors.LiquidationAfterExpiry();
+        if (finalized) revert Errors.TrancheMarketAlreadyFinalized();
+
+        uint256 oraclePrice = _getOraclePrice();
+        if (oraclePrice >= liquidationPrice) revert Errors.LiquidationConditionNotMet();
+
+        uint256 uaQuantity = _uaToken.balanceOf(address(this));
+        if (uaQuantity == 0) revert Errors.SettlementZeroQuantity();
+
+        uint256 srSupply = _srTokenContract.totalSupply();
+        uint256 jrSupply = _jrTokenContract.totalSupply();
+
+        _liquidatorReward = jrSupply.mulDown(liquidationReward);
+
+        uint256 remainingUA = uaQuantity - _liquidatorReward;
+        srRateUA = remainingUA.divDown(srSupply);
+        jrRateUA = 0;
+        finalized = true;
+
+        if (_liquidatorReward > 0) {
+            _uaToken.safeTransfer(msg.sender, _liquidatorReward);
+        }
+
+        emit Liquidate(oraclePrice, liquidationPrice, srRateUA, _liquidatorReward, msg.sender);
+    }
+
     // ============ Preview Functions ============
 
     /**
@@ -343,6 +407,47 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         SettlementRatioModel.SettlementResult memory result = SettlementRatioModel.calculateSettlement(params);
         _srRateUA = result.srRateUA;
         _jrRateUA = result.jrRateUA;
+    }
+
+    /**
+     * @notice Preview liquidation state and potential outcomes
+     * @dev Read-only function that calculates liquidation parameters
+     * @return canLiquidate Whether liquidation conditions are currently met
+     * @return currentPrice Current oracle price (1e18 precision)
+     * @return liquidationPriceValue Price threshold for liquidation (1e18 precision)
+     * @return _srRateUA Projected senior redemption rate if liquidated
+     * @return _liquidatorReward Projected reward for liquidator in UA
+     */
+    function previewLiquidation()
+        external
+        view
+        override
+        returns (
+            bool canLiquidate,
+            uint256 currentPrice,
+            uint256 liquidationPriceValue,
+            uint256 _srRateUA,
+            uint256 _liquidatorReward
+        )
+    {
+        liquidationPriceValue = liquidationPrice;
+
+        if (!liquidationEnabled || block.timestamp >= expiry || finalized) {
+            return (false, 0, liquidationPriceValue, 0, 0);
+        }
+
+        currentPrice = _getOraclePrice();
+        canLiquidate = currentPrice < liquidationPrice;
+
+        if (canLiquidate) {
+            uint256 uaQuantity = _uaToken.balanceOf(address(this));
+            uint256 srSupply = _srTokenContract.totalSupply();
+            uint256 jrSupply = _jrTokenContract.totalSupply();
+
+            _liquidatorReward = jrSupply.mulDown(liquidationReward);
+            uint256 remainingUA = uaQuantity - _liquidatorReward;
+            _srRateUA = remainingUA.divDown(srSupply);
+        }
     }
 
     // ============ Internal Functions ============

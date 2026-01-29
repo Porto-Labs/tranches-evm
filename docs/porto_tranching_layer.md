@@ -20,6 +20,10 @@ The Tranching Layer is Porto's foundational primitive that **structures yield** 
 | **jrUA (Junior Tranche)** | Levered exposure to residual yield/risk after Senior's target return |
 | **Tranche Ratio** | Fixed mint/redeem ratio at deployment (e.g., 4:1 Senior:Junior); static until maturity |
 | **Maturity** | Fixed timestamp when tranche series finalizes; enables unilateral redemption |
+| **Liquidation** | Premature finalization triggered when junior tranche approaches wipeout; opt-in feature |
+| **Liquidation Price** | Oracle price threshold below which liquidation can be triggered |
+| **Liquidation Buffer** | Configurable % of junior principal reserved as extra senior protection (max 2.5%) |
+| **Liquidation Reward** | Configurable % of junior principal paid to liquidator as incentive (max 2.5%) |
 
 ---
 
@@ -108,15 +112,19 @@ Progressive shift to fully automated finalization:
 1. **Fixed ratio minting**
 2. **Pre-maturity recomposition requires both tranches in exact ratio**
 3. **Maturity finalization locks immutable redemption rates**
+4. **Liquidation only triggers when oracle price < liquidation price** (if enabled)
+5. **Liquidation sets junior redemption rate to 0**
 
 ### Phase 1 Trust Assumptions
 Multisig authority limited to:
 - **Timing:** When to call `finalize()` after maturity
+- **Timing:** When to call `liquidate()` before maturity (if conditions met)
 - **Sanity check:** Provide reference price + deviation threshold
 
 **NOT trusted for:**
 - Rate calculation (done on-chain via oracle)
 - Rate manipulation (oracle validation enforced)
+- Liquidation condition bypass (enforced on-chain)
 
 ---
 
@@ -129,16 +137,26 @@ Multisig authority limited to:
 | `V_total` | Total USD value at settlement = `Quantity_UA × Oracle_Price` |
 | `P_sr` | Senior Principal (original USD allocation) |
 | `P_jr` | Junior Principal (original USD allocation) |
-| `R_floor` | Senior Floor APY (e.g., 0.04) |
-| `R_target` | Senior Target APY (e.g., 0.06) |
-| `t` | Time fraction of compounding period (e.g., 1/12 for 1 month) |
+| `Y_floor` | Senior Floor Yield **for the period** (e.g., 0.0033 for 0.33%) |
+| `Y_target` | Senior Target Yield **for the period** (e.g., 0.005 for 0.5%) |
 
-### 8.2 Threshold Calculations (Compounded)
+**Note on Period Yields:**
+Floor and target are expressed as yields for the specific tranche period, not annual rates.
 
-Using formula: `Principal × (1 + APY)^t`
+To convert from APY to period yield:
+- **Compound:** `Y_period = (1 + APY)^(period/year) - 1`
+- **Simple:** `Y_period = APY × (period/year)`
 
-- **V_floor (Senior Hard Claim):** `V_floor = P_sr × (1 + R_floor)^t`
-- **V_target (Senior Max Cap):** `V_target = P_sr × (1 + R_target)^t`
+Example: 12% APY for a 3-month tranche:
+- Compound: `(1.12)^(3/12) - 1 = 0.0287` (2.87%)
+- Simple: `0.12 × (3/12) = 0.03` (3%)
+
+### 8.2 Threshold Calculations
+
+Using formula: `Principal × (1 + Period_Yield)`
+
+- **V_floor (Senior Hard Claim):** `V_floor = P_sr × (1 + Y_floor)`
+- **V_target (Senior Max Cap):** `V_target = P_sr × (1 + Y_target)`
 
 ### 8.3 Conditional Logic (Waterfall)
 
@@ -146,7 +164,7 @@ The smart contract compares `V_total` against thresholds to determine the split.
 
 #### Condition A: Surplus (Full Target Met)
 - **Trigger:** `V_total >= (V_target + P_jr)`
-- **Senior Payout:** `V_target` (capped at Target APY)
+- **Senior Payout:** `V_target` (capped at target yield)
 - **Junior Payout:** `V_total - V_target` (principal + all residual yield)
 
 #### Condition B: Target Compression (Senior Priority)
@@ -167,17 +185,17 @@ The smart contract compares `V_total` against thresholds to determine the split.
 - Maturity: 1 month
 - UA Quantity: 100
 - Allocation: $70 Senior / $30 Junior
-- R_floor: 4% APY, R_target: 6% APY
-- t = 1/12
+- Y_floor: 0.33% (period yield, ~4% APY equivalent)
+- Y_target: 0.49% (period yield, ~6% APY equivalent)
 
 ### Calculated Thresholds
-- **V_floor:** `70 × (1.04)^(1/12) = $70.229`
-- **V_target:** `70 × (1.06)^(1/12) = $70.340`
+- **V_floor:** `70 × (1 + 0.0033) = $70.231`
+- **V_target:** `70 × (1 + 0.0049) = $70.343`
 
 ### Example 1: Condition A (Surplus)
 UA price = $1.01 → V_total = $101.00
 
-Check: $101.00 >= ($70.340 + $30.00)? **Yes**
+Check: $101.00 >= ($70.343 + $30.00)? **Yes**
 
 | Output | Value |
 |--------|-------|
@@ -189,7 +207,7 @@ Check: $101.00 >= ($70.340 + $30.00)? **Yes**
 ### Example 2: Condition B (Target Compression)
 UA price = $1.003 → V_total = $100.30
 
-Check: $100.30 between $100.229 and $100.340? **Yes**
+Check: $100.30 between $100.231 and $100.343? **Yes**
 
 | Output | Value |
 |--------|-------|
@@ -201,7 +219,7 @@ Check: $100.30 between $100.229 and $100.340? **Yes**
 ### Example 3: Condition C (Junior Erosion)
 UA price = $1.00 → V_total = $100.00
 
-Check: $100.00 < $100.229? **Yes**
+Check: $100.00 < $100.231? **Yes**
 
 | Output | Value |
 |--------|-------|
@@ -209,6 +227,133 @@ Check: $100.00 < $100.229? **Yes**
 | Junior Payout (USD) | $29.77 |
 | srUA Redemption Rate | 70.23 UA (1.003 UA/token) |
 | jrUA Redemption Rate | 29.77 UA (0.992 UA/token) |
+
+---
+
+## 10. Liquidation Mechanism
+
+### 10.1 Overview
+
+Liquidation is an **opt-in** premature finalization mechanism that protects senior tranche holders when the underlying asset price drops significantly before maturity.
+
+**Purpose:**
+- Allow early exit when junior tranche approaches wipeout
+- Protect senior holders from prolonged exposure to deteriorating conditions
+- Incentivize timely liquidation through liquidator rewards
+
+**When enabled:**
+- Market can be liquidated before maturity if oracle price falls below the liquidation price
+- Junior redemption rate is set to 0
+- Senior holders receive all remaining UA after liquidator reward
+
+### 10.2 Liquidation Parameters
+
+Configured at market deployment:
+
+| Parameter | Description | Constraints |
+|-----------|-------------|-------------|
+| `liquidationEnabled` | Enable/disable liquidation feature | Boolean |
+| `liquidationBuffer` | Extra senior protection from junior principal | Max 2.5% of junior principal |
+| `liquidationReward` | Incentive paid to liquidator from junior principal | Max 2.5% of junior principal |
+
+**Combined maximum:** `liquidationBuffer + liquidationReward` ≤ 5% of junior principal
+
+### 10.3 Liquidation Price Calculation
+
+The liquidation price is the oracle price threshold below which liquidation can be triggered.
+
+#### Formula
+
+```
+V_senior_floor = P_initial × R_senior × (1 + Y_floor)
+V_junior_reserved = P_initial × R_junior × (liquidationBuffer + liquidationReward)
+
+liquidation_price = V_senior_floor + V_junior_reserved
+```
+
+#### Simplified
+
+```
+liquidation_price = P_initial × (R_senior × (1 + Y_floor) + R_junior × (liquidationBuffer + liquidationReward))
+```
+
+Where:
+- `P_initial`: UA price at market creation
+- `R_senior`: Senior tranche ratio (e.g., 0.7 for 70%)
+- `R_junior`: Junior tranche ratio (e.g., 0.3 for 30%)
+- `Y_floor`: Senior floor yield **for the period** (see Section 8.1 for conversion from APY)
+
+### 10.4 Liquidation Trigger
+
+#### Condition
+Liquidation can be triggered when:
+```
+oracle_price < liquidation_price
+```
+
+#### Constraints
+- **Pre-expiry only:** Liquidation can only occur before maturity
+- **Admin-only (Phase 1):** Only multisig can call `liquidate()`
+- **Single trigger:** Once liquidated, market is finalized (same as normal finalization)
+- **Oracle freshness:** Standard staleness check (24h) applies
+
+### 10.5 Settlement on Liquidation
+
+#### Flow
+
+1. Admin calls `liquidate()`
+2. Contract validates: `oracle_price < liquidation_price`
+3. Liquidator reward (in UA) is calculated and **immediately transferred** to caller
+4. `jrRateUA` is set to 0
+5. `srRateUA` is calculated from remaining UA in contract
+6. Market is marked as finalized
+7. Senior holders redeem via `redeemSenior()` as usual
+
+#### Distribution
+
+| Recipient | Amount |
+|-----------|--------|
+| Liquidator | `liquidationReward` % of junior principal (immediate transfer) |
+| Senior holders | All remaining UA in contract (via redemption) |
+| Junior holders | 0 |
+
+### 10.6 Liquidation Example
+
+Using common parameters from Section 9:
+- Initial price: $1.00
+- Senior ratio: 70%, Junior ratio: 30%
+- Y_floor: 0.33% (period yield, equivalent to ~4% APY for 1 month)
+- Liquidation buffer: 2.5%
+- Liquidation reward: 2.5%
+- UA Quantity: 100
+
+#### Calculated Values
+- Senior principal: $70.00
+- Junior principal: $30.00
+- V_senior_floor: $70 × (1 + 0.0033) = $70.231
+- V_junior_reserved: $30 × 0.05 = $1.50
+- **Liquidation price: $0.71731** (($70.231 + $1.50) / 100 UA)
+
+#### Scenario: Price Drops to $0.69
+
+Oracle price ($0.69) < Liquidation price ($0.71731) → **Liquidation triggered**
+
+| Step | Action | Amount |
+|------|--------|--------|
+| 1 | Liquidator reward transferred | 2.5% × $30 = $0.75 worth of UA (~1.09 UA) |
+| 2 | Remaining UA for seniors | ~98.91 UA |
+| 3 | Junior redemption rate | 0 |
+| 4 | Senior redemption rate | 98.91 / 70 = ~1.413 UA/token |
+
+#### Comparison: Without Liquidation
+
+If liquidation was not enabled and market reached maturity at $0.69:
+- Condition C (Junior Erosion) would apply
+- V_total = $69.00
+- Senior would receive min($69.00, $70.231) = $69.00
+- Junior would receive $0
+
+**Liquidation advantage:** Senior holders exit early with similar protection, avoiding further price deterioration risk. The small cost (liquidation buffer + reward from junior) provides certainty and early exit.
 
 [image1]: <data:image/png;base64,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>
 

@@ -208,6 +208,23 @@ interface ITrancheMarket {
      */
     function previewSettlement() external view returns (uint256 srRateUA, uint256 jrRateUA, uint256 oraclePrice);
 
+/// @notice Returns swap parameters for Router in a single call
+    /// @return uaAddress Underlying Asset token address
+    /// @return srAddress Senior tranche token address
+    /// @return jrAddress Junior tranche token address
+    function getSwapParameters()
+        external
+        view
+        returns (address uaAddress, address srAddress, address jrAddress);
+
+    /**
+     * @notice Preview the amounts of senior and junior tokens that would be minted for a given UA input
+     * @param uaIn Amount of UA to tranche
+     * @return srOut Amount of senior tokens that would be minted
+     * @return jrOut Amount of junior tokens that would be minted
+     */
+    function previewTranche(uint256 uaIn) external view returns (uint256 srOut, uint256 jrOut);
+
     /**
      * @notice Preview liquidation state and potential outcomes
      * @dev Read-only function that calculates liquidation parameters

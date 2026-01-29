@@ -299,7 +299,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         if (srIn == 0) revert Errors.TrancheZeroAmount();
         if (receiver == address(0)) revert Errors.ZeroAddress();
 
-        _srTokenContract.burn(msg.sender, srIn);
+        _srTokenContract.burn(msg.sender, srIn);   
         uaOut = srIn.mulDown(srRateUA);
         _uaToken.safeTransfer(receiver, uaOut);
 
@@ -507,5 +507,29 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     /// @notice Returns the Chainlink price feed address
     function priceFeed() external view override returns (address) {
         return address(_priceFeed);
+    }
+
+    /// @notice Returns swap parameters for Router in a single call
+    /// @return uaAddress Underlying Asset token address
+    /// @return srAddress Senior tranche token address
+    /// @return jrAddress Junior tranche token address
+    function getSwapParameters()
+        external
+        view
+        override
+        returns (address uaAddress, address srAddress, address jrAddress)
+    {
+        return (address(_uaToken), address(_srTokenContract), address(_jrTokenContract));
+    }
+
+    /**
+     * @notice Preview the amounts of senior and junior tokens that would be minted for a given UA input
+     * @param uaIn Amount of UA to tranche
+     * @return srOut Amount of senior tokens that would be minted
+     * @return jrOut Amount of junior tokens that would be minted
+     */
+    function previewTranche(uint256 uaIn) external view override returns (uint256 srOut, uint256 jrOut) {
+        srOut = uaIn.mulDown(seniorRatio);
+        jrOut = uaIn.mulDown(juniorRatio);
     }
 }

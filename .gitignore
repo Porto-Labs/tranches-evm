@@ -1,13 +1,10 @@
 # Dependencies
 node_modules/
-package-lock.json
+lib/
 
 # Build artifacts
-build/
-artifacts/
-cache/
-dist/
-typechain-types/
+out/
+cache_forge/
 
 # Environment variables
 .env
@@ -25,10 +22,9 @@ typechain-types/
 .DS_Store
 Thumbs.db
 
-# Hardhat
+# Coverage
 coverage/
-coverage.json
-.openzeppelin/
+lcov.info
 
 # Yarn
 .yarn/*
@@ -49,12 +45,8 @@ yarn-error.log*
 *.tmp
 *.temp
 
-# Gas reports
-gas-report.txt
-
-# Deployment artifacts (optional - you may want to commit these)
-deployments/localhost/
-deployments/hardhat/
+# Foundry
+broadcast/
 
 # LLM related
 *_task.md

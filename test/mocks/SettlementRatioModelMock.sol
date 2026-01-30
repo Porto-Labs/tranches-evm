@@ -1,25 +1,15 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.23;
+pragma solidity ^0.8.28;
 
-import { SettlementRatioModel } from "../settlement/SettlementRatioModel.sol";
+import { SettlementRatioModel } from "src/settlement/SettlementRatioModel.sol";
 
-/**
- * @title SettlementRatioModelHarness
- * @notice Test wrapper to expose internal library functions for testing
- */
-contract SettlementRatioModelHarness {
-    /**
-     * @notice Expose calculateSettlement for testing
-     */
+contract SettlementRatioModelMock {
     function calculateSettlement(
         SettlementRatioModel.SettlementParams memory params
     ) external pure returns (SettlementRatioModel.SettlementResult memory) {
         return SettlementRatioModel.calculateSettlement(params);
     }
 
-    /**
-     * @notice Expose _calculatePrincipals for testing
-     */
     function calculatePrincipals(
         uint256 uaQuantity,
         uint256 initialPrice,
@@ -28,9 +18,6 @@ contract SettlementRatioModelHarness {
         return SettlementRatioModel._calculatePrincipals(uaQuantity, initialPrice, seniorRatio);
     }
 
-    /**
-     * @notice Expose _calculateThresholds for testing
-     */
     function calculateThresholds(
         uint256 pSr,
         uint256 seniorFloor,
@@ -39,9 +26,6 @@ contract SettlementRatioModelHarness {
         return SettlementRatioModel._calculateThresholds(pSr, seniorFloor, seniorTarget);
     }
 
-    /**
-     * @notice Expose _calculatePayouts for testing
-     */
     function calculatePayouts(
         uint256 vTotal,
         uint256 pJr,
@@ -51,9 +35,6 @@ contract SettlementRatioModelHarness {
         return SettlementRatioModel._calculatePayouts(vTotal, pJr, vFloor, vTarget);
     }
 
-    /**
-     * @notice Expose _calculateRates for testing
-     */
     function calculateRates(
         uint256 seniorPayoutUsd,
         uint256 juniorPayoutUsd,
@@ -61,20 +42,12 @@ contract SettlementRatioModelHarness {
         uint256 uaQuantity,
         uint256 seniorRatio
     ) external pure returns (uint256 srRateUA, uint256 jrRateUA) {
-        return
-            SettlementRatioModel._calculateRates(
-                seniorPayoutUsd,
-                juniorPayoutUsd,
-                maturityPrice,
-                uaQuantity,
-                seniorRatio
-            );
-    }
-
-    /**
-     * @notice Helper constant for tests
-     */
-    function one() external pure returns (uint256) {
-        return 1e18;
+        return SettlementRatioModel._calculateRates(
+            seniorPayoutUsd,
+            juniorPayoutUsd,
+            maturityPrice,
+            uaQuantity,
+            seniorRatio
+        );
     }
 }

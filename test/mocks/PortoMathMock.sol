@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.23;
+pragma solidity ^0.8.28;
 
-import { PortoMath } from "../libraries/math/PortoMath.sol";
+import { PortoMath } from "src/libraries/math/PortoMath.sol";
 
-contract PortoMathHarness {
+contract PortoMathMock {
     using PortoMath for uint256;
 
     function mulDown(uint256 a, uint256 b) external pure returns (uint256) {

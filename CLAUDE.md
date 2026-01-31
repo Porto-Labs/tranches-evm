@@ -3,7 +3,7 @@
 ## General
 
 - Use Foundry for development, testing, and deployment
-- Use yarn for npm dependencies (OpenZeppelin, Chainlink, Uniswap)
+- Dependencies are managed via Foundry git submodules in `lib/`
 - Always keep PROGRESS.md up-to-date as the bootstrap entrypoint for context
 - Check and edit PROGRESS.md before and after completing a milestone or task
 - Only track meaningful features in PROGRESS.md (not bugfixes, refactorings, or cleanup)
@@ -19,8 +19,7 @@
 src/           - Production contracts
 test/          - Foundry tests (.t.sol)
 test/mocks/    - Mock contracts for testing
-lib/           - Git submodule dependencies (forge-std)
-node_modules/  - NPM dependencies (OpenZeppelin, Chainlink, Uniswap)
+lib/           - Git submodule dependencies (forge-std, OpenZeppelin, Chainlink, Uniswap)
 script/        - Deployment scripts
 ```
 
@@ -34,7 +33,7 @@ forge test               # Run all tests
 forge test -vvv          # Run tests with verbose output
 forge test --match-test testFunctionName  # Run specific test
 forge test --match-contract ContractName  # Run tests in specific contract
-forge coverage           # Generate coverage report
+forge coverage --ir-minimum  # Generate coverage report (--ir-minimum prevents stack too deep errors)
 forge fmt                # Format Solidity files
 ```
 

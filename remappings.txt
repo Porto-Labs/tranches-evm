@@ -1,5 +1,5 @@
-@chainlink/contracts/=node_modules/@chainlink/contracts/
-@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/
-@uniswap/v3-periphery/=node_modules/@uniswap/v3-periphery/
-@uniswap/v3-core/=node_modules/@uniswap/v3-core/
+@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts/
+@uniswap/v3-core/=lib/v3-core/
+@uniswap/v3-periphery/=lib/v3-periphery/
 forge-std/=lib/forge-std/src/

@@ -74,6 +74,7 @@ contract TrancheMarketLiquidationTest is Test {
     function _setBelowLiquidationPrice() internal {
         uint256 liqPrice = market.liquidationPrice();
         uint256 belowLiqPrice = (liqPrice * 99) / 100;
+        // forge-lint: disable-next-line(unsafe-typecast)
         int256 oracle8Dec = int256((belowLiqPrice * 100000000) / ONE);
         oracle.setRoundData(oracle8Dec, block.timestamp);
     }

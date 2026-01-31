@@ -197,6 +197,7 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         uniswapPool.swap({
             recipient: address(this),
             zeroForOne: zeroForOne,
+            // forge-lint: disable-next-line(unsafe-typecast)
             amountSpecified: -int256(uaToBorrow),
             sqrtPriceLimitX96: zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
             data: data
@@ -237,6 +238,7 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         uniswapPool.swap({
             recipient: address(this),
             zeroForOne: zeroForOne,
+            // forge-lint: disable-next-line(unsafe-typecast)
             amountSpecified: -int256(srNeeded),
             sqrtPriceLimitX96: zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
             data: data
@@ -278,6 +280,7 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         uniswapPool.swap({
             recipient: address(this),
             zeroForOne: zeroForOne,
+            // forge-lint: disable-next-line(unsafe-typecast)
             amountSpecified: -int256(srNeeded),
             sqrtPriceLimitX96: zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
             data: data
@@ -320,6 +323,7 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         uniswapPool.swap({
             recipient: address(this),
             zeroForOne: zeroForOne,
+            // forge-lint: disable-next-line(unsafe-typecast)
             amountSpecified: -int256(uaToBorrow),
             sqrtPriceLimitX96: zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
             data: data
@@ -352,24 +356,28 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         if (operation == SwapOperation.SELL_JUNIOR) {
             (uint256 jrIn, uint256 minUaOut) = (amount, minOut);
 
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 srBorrowed = uaIsToken0 ? uint256(-amount1Delta) : uint256(-amount0Delta);
 
             _handleSellJunior(user, jrIn, minUaOut, srBorrowed, uaAddress, srAddress, jrAddress);
         } else if (operation == SwapOperation.BUY_JUNIOR) {
             (uint256 uaIn, uint256 minJrOut) = (amount, minOut);
 
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 uaBorrowed = uaIsToken0 ? uint256(-amount0Delta) : uint256(-amount1Delta);
-            
+
             _handleBuyJunior(user, uaIn, minJrOut, uaBorrowed, uaAddress, srAddress, jrAddress);
         } else if (operation == SwapOperation.SWAP_JUNIOR_TO_SENIOR) {
             (uint256 jrIn, uint256 minSrOut) = (amount, minOut);
 
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 srBorrowed = uaIsToken0 ? uint256(-amount1Delta) : uint256(-amount0Delta);
 
             _handleSwapJuniorToSenior(user, jrIn, minSrOut, srBorrowed, uaAddress, srAddress, jrAddress);
         } else if (operation == SwapOperation.SWAP_SENIOR_TO_JUNIOR) {
             (uint256 srIn, uint256 minJrOut) = (amount, minOut);
 
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 uaBorrowed = uaIsToken0 ? uint256(-amount0Delta) : uint256(-amount1Delta);
 
             _handleSwapSeniorToJunior(user, srIn, minJrOut, uaBorrowed, uaAddress, srAddress, jrAddress);

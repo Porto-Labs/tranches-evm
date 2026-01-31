@@ -1,10 +1,8 @@
-# Dependencies
-node_modules/
-lib/
-
 # Build artifacts
 out/
 cache_forge/
+build/
+broadcast/
 
 # Environment variables
 .env
@@ -25,28 +23,14 @@ Thumbs.db
 # Coverage
 coverage/
 lcov.info
-
-# Yarn
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/sdks
-!.yarn/versions
-.pnp.*
+coverage.json
 
 # Logs
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
 # Temp files
 *.tmp
 *.temp
-
-# Foundry
-broadcast/
 
 # LLM related
 *_task.md

@@ -462,10 +462,13 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      */
     function _scalePrice(int256 _price, uint8 _priceDecimals, uint8 _targetDecimals) internal pure returns (uint256) {
         if (_priceDecimals < _targetDecimals) {
+            // forge-lint: disable-next-line(unsafe-typecast)
             return uint256(_price) * 10 ** uint256(_targetDecimals - _priceDecimals);
         } else if (_priceDecimals > _targetDecimals) {
+            // forge-lint: disable-next-line(unsafe-typecast)
             return uint256(_price) / 10 ** uint256(_priceDecimals - _targetDecimals);
         }
+        // forge-lint: disable-next-line(unsafe-typecast)
         return uint256(_price);
     }
 

@@ -35,3 +35,4 @@ coverage.json
 
 # LLM related
 *_task.md
+node_modules

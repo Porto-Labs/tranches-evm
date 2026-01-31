@@ -3,9 +3,9 @@ pragma solidity ^0.8.23;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { ISwapRouter } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import { IUniswapV3Pool } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import { IUniswapV3SwapCallback } from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
+import { IV3SwapRouter } from "@uniswap/swap-router-contracts/contracts/interfaces/IV3SwapRouter.sol";
 import { ITrancheMarket } from "../interfaces/ITrancheMarket.sol";
 import { IRouter } from "../interfaces/IRouter.sol";
 import { Errors } from "../errors/Errors.sol";
@@ -36,7 +36,7 @@ contract Router is IRouter, IUniswapV3SwapCallback {
     // ============ Immutables ============
 
     /// @notice Uniswap V3 Swap Router
-    ISwapRouter public immutable swapRouter;
+    IV3SwapRouter public immutable swapRouter;
 
     /// @notice TrancheMarket contract
     ITrancheMarket public immutable trancheMarket;
@@ -78,7 +78,7 @@ contract Router is IRouter, IUniswapV3SwapCallback {
             revert Errors.ZeroAddress();
         }
 
-        swapRouter = ISwapRouter(_swapRouter);
+        swapRouter = IV3SwapRouter(_swapRouter);
         trancheMarket = ITrancheMarket(_trancheMarket);
         uniswapPool = IUniswapV3Pool(_uniswapPool);
         poolFee = _poolFee;
@@ -107,12 +107,11 @@ contract Router is IRouter, IUniswapV3SwapCallback {
 
         IERC20(uaAddress).forceApprove(address(swapRouter), uaIn);
 
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
+        IV3SwapRouter.ExactInputSingleParams memory params = IV3SwapRouter.ExactInputSingleParams({
             tokenIn: uaAddress,
             tokenOut: srAddress,
             fee: poolFee,
             recipient: msg.sender,
-            deadline: deadline,
             amountIn: uaIn,
             amountOutMinimum: minSrOut,
             sqrtPriceLimitX96: 0
@@ -144,12 +143,11 @@ contract Router is IRouter, IUniswapV3SwapCallback {
 
         IERC20(srAddress).forceApprove(address(swapRouter), srIn);
 
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
+        IV3SwapRouter.ExactInputSingleParams memory params = IV3SwapRouter.ExactInputSingleParams({
             tokenIn: srAddress,
             tokenOut: uaAddress,
             fee: poolFee,
             recipient: msg.sender,
-            deadline: deadline,
             amountIn: srIn,
             amountOutMinimum: minUaOut,
             sqrtPriceLimitX96: 0
@@ -408,12 +406,11 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         // Buy SR with UA to repay flash loan
         IERC20(uaAddress).forceApprove(address(swapRouter), uaReceived);
 
-        ISwapRouter.ExactOutputSingleParams memory swapParams = ISwapRouter.ExactOutputSingleParams({
+        IV3SwapRouter.ExactOutputSingleParams memory swapParams = IV3SwapRouter.ExactOutputSingleParams({
             tokenIn: uaAddress,
             tokenOut: srAddress,
             fee: poolFee,
             recipient: address(this),
-            deadline: block.timestamp,
             amountOut: srBorrowed,
             amountInMaximum: uaReceived,
             sqrtPriceLimitX96: 0
@@ -458,12 +455,11 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         // Sell SR for UA to repay flash loan
         IERC20(srAddress).forceApprove(address(swapRouter), srMinted);
 
-        ISwapRouter.ExactOutputSingleParams memory swapParams = ISwapRouter.ExactOutputSingleParams({
+        IV3SwapRouter.ExactOutputSingleParams memory swapParams = IV3SwapRouter.ExactOutputSingleParams({
             tokenIn: srAddress,
             tokenOut: uaAddress,
             fee: poolFee,
             recipient: address(this),
-            deadline: block.timestamp,
             amountOut: uaBorrowed,
             amountInMaximum: srMinted,
             sqrtPriceLimitX96: 0
@@ -507,12 +503,11 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         // Swap all UA for SR
         IERC20(uaAddress).forceApprove(address(swapRouter), uaReceived);
 
-        ISwapRouter.ExactInputSingleParams memory swapParams = ISwapRouter.ExactInputSingleParams({
+        IV3SwapRouter.ExactInputSingleParams memory swapParams = IV3SwapRouter.ExactInputSingleParams({
             tokenIn: uaAddress,
             tokenOut: srAddress,
             fee: poolFee,
             recipient: address(this),
-            deadline: block.timestamp,
             amountIn: uaReceived,
             amountOutMinimum: srBorrowed,
             sqrtPriceLimitX96: 0
@@ -554,12 +549,11 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         // Sell SR for exactly uaBorrowed UA to repay the flash loan
         IERC20(srAddress).forceApprove(address(swapRouter), totalSr);
 
-        ISwapRouter.ExactOutputSingleParams memory swapParams = ISwapRouter.ExactOutputSingleParams({
+        IV3SwapRouter.ExactOutputSingleParams memory swapParams = IV3SwapRouter.ExactOutputSingleParams({
             tokenIn: srAddress,
             tokenOut: uaAddress,
             fee: poolFee,
             recipient: address(this),
-            deadline: block.timestamp,
             amountOut: uaBorrowed,
             amountInMaximum: totalSr,
             sqrtPriceLimitX96: 0

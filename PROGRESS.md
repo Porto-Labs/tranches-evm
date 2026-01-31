@@ -1,8 +1,7 @@
 # Porto Tranches - Implementation Progress
 
-**Repository:** /Users/kotashki/Documents/dev/porto/tranches-evm
 **Spec:** [docs/porto_tranching_layer.md](docs/porto_tranching_layer.md)
-**Last Updated:** 2026-01-29
+**Last Updated:** 2026-01-30
 
 ---
 
@@ -21,21 +20,21 @@ Building a tranching mechanism (UA → srUA + jrUA) for yield-bearing assets.
 | 3 | Liquidation Trigger - Opt-in premature finalization | ✅ |
 | 4a | Router - Tranche swap operations | ✅ |
 | 4b | Factory | ⬚ Skipped (not needed for POC) |
-| 5 | Integration Testing - 124 unit tests | ✅ |
+| 5 | Foundry Migration - 104 Solidity tests | ✅ |
 
 ---
 
 ## Phase 6: Foundry Migration
 
-**Status:** ⬚ Pending
+**Status:** ✅ Complete
 
 | Task | Description | Status |
 |------|-------------|--------|
-| 6.1 | Project setup (foundry.toml, remappings, deps) | ⬚ Pending |
-| 6.2 | Move contracts to src/ | ⬚ Pending |
-| 6.3 | Update CLAUDE.md for Foundry conventions | ⬚ Pending |
-| 6.4 | Migrate unit tests to Solidity | ⬚ Pending |
-| 6.5 | Remove Hardhat artifacts | ⬚ Pending |
+| 6.1 | Project setup (foundry.toml, remappings, deps) | ✅ |
+| 6.2 | Move contracts to src/ | ✅ |
+| 6.3 | Update CLAUDE.md for Foundry conventions | ✅ |
+| 6.4 | Migrate unit tests to Solidity (104 tests) | ✅ |
+| 6.5 | Remove Hardhat artifacts | ✅ |
 
 ---
 
@@ -66,6 +65,7 @@ Building a tranching mechanism (UA → srUA + jrUA) for yield-bearing assets.
 
 ## Notes
 
-- Solidity 0.8.23 (to be upgraded in Phase 8)
+- Solidity 0.8.28 with `cancun` EVM (transient storage support)
+- Foundry framework with `via_ir` compilation
 - OpenZeppelin contracts for ERC20 base
 - Chainlink contracts for oracle integration

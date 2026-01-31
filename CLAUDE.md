@@ -2,159 +2,185 @@
 
 ## General
 
-- Use yarn for package management
+- Use Foundry for development, testing, and deployment
+- Dependencies are managed via Foundry git submodules in `lib/`
 - Always keep PROGRESS.md up-to-date as the bootstrap entrypoint for context
 - Check and edit PROGRESS.md before and after completing a milestone or task
 - Only track meaningful features in PROGRESS.md (not bugfixes, refactorings, or cleanup)
 - We use 1e18 decimal precision within the project. If an external integration returns different precision it should be converted straight away to 1e18 precision.
-- Do not use WAD terminilogy
+- Do not use WAD terminology
 - Do not add in-line comments. Code should be self explanatory. Code + natspec + intuitive variable naming should be enough for clean code.
+
+---
+
+## Project Structure
+
+```
+src/           - Production contracts
+test/          - Foundry tests (.t.sol)
+test/mocks/    - Mock contracts for testing
+lib/           - Git submodule dependencies
+script/        - Deployment scripts
+```
+
+---
+
+## Commands
+
+```bash
+forge build              # Compile contracts
+forge test               # Run all tests
+forge test -vvv          # Run tests with verbose output
+forge test --match-test testFunctionName  # Run specific test
+forge test --match-contract ContractName  # Run tests in specific contract
+forge coverage --ir-minimum  # Generate coverage report (--ir-minimum prevents stack too deep errors)
+forge fmt                # Format Solidity files
+```
 
 ---
 
 ## Test Writing Guidelines
 
-### `describe` vs `context`
+### Test File Organization
 
-In Mocha, `describe` and `context` are aliases (functionally identical). The difference is semantic:
+Separate test files by business logic domain:
 
-- **`describe`** - groups tests around a unit (contract, function)
-- **`context`** - describes a scenario or state ("when X", "with valid input")
-
-```typescript
-describe("MyContract", function () {
-  context("when valid data", function () { /* tests */ });
-  context("when invalid data", function () { /* tests */ });
-});
+```
+test/
+├── PortoDeposit.t.sol         # Deposit/withdrawal logic
+├── PortoBorrow.t.sol          # Minting/borrowing logic
+├── PortoLiquidation.t.sol     # Liquidation mechanism
+├── PortoRepay.t.sol           # Debt repayment logic
+├── Invariants/
+│   └── BaseInvariant.t.sol
+└── mocks/
 ```
 
-Either style is acceptable; consistency within a file matters more.
+### Test Type Decision Tree
 
-### Structure
-
-```typescript
-describe("ContractName", function () {
-  // Shared variables
-  let contract: Contract;
-  let signers: Signer[];
-
-  before(async function () {
-    // Global setup - deploy contracts, get signers
-    // Runs once before all tests in this describe block
-  });
-
-  afterEach(async function () {
-    // Reset state between tests (via loadFixture or snapshot/restore)
-  });
-
-  context("functionName", function () {
-    beforeEach(async function () {
-      // Function-specific setup if needed
-    });
-
-    // 1. Happy path tests FIRST
-    it("Should do X when Y", async function () { ... });
-    it("Should handle edge case Z", async function () { ... });
-
-    // 2. Revert cases LAST - grouped in dedicated context
-    context("Revert reasons", function () {
-      it("Reverts when invalid input", async function () { ... });
-      it("Reverts when unauthorized", async function () { ... });
-    });
-  });
-});
+```
+What are you testing?
+│
+├─► Single function behavior → Unit Test (test_)
+│   └─► With random inputs → Fuzz Test (testFuzz_)
+│
+├─► Protocol-wide property → Invariant Test (invariant_)
+│   └─► "X should always be true"
+│
+└─► Real contract interaction → Fork Test (testFork_)
 ```
 
-### Key Principles
+### Revert Reasons Checklist
 
-1. **Happy paths first** - Test successful scenarios at the top of each function context
-2. **"Revert reasons" at end** - Group all error cases in a dedicated nested context
-3. **Test events AND state** - Verify both emitted events and resulting state changes
-4. **Use `loadFixture`** - For setup/reset to enable snapshot/restore
-5. **One assertion focus per test** - Each test should verify one logical behavior
+For each function, consider testing these revert scenarios:
 
-### Assertion Patterns
+- **Access control** - Unauthorized caller rejected
+- **Zero address** - Invalid address(0) input rejected
+- **Zero amount** - Invalid zero value rejected
+- **Not found** - Resource/entity doesn't exist
+- **Invalid state** - Wrong state for operation
+- **Already exists** - Duplicate creation rejected
+- **Insufficient balance** - Not enough funds
 
-```typescript
-// Events - verify emission and arguments
-await expect(tx).to.emit(contract, "EventName").withArgs(arg1, arg2);
+### Naming Conventions
 
-// State changes - verify before and after
-expect(await contract.getValue()).to.equal(expected);
-
-// Custom errors with arguments
-await expect(tx)
-  .to.be.revertedWithCustomError(contract, "ErrorName")
-  .withArgs(expected1, expected2);
-
-// Access control errors
-await expect(contract.connect(unauthorized).method())
-  .to.be.revertedWithCustomError(accessControl, "AccessControlUnauthorizedAccount");
-
-// Panic codes (overflow, division by zero, etc.)
-await expect(tx).to.be.revertedWithPanic("0x12"); // division by zero
-await expect(tx).to.be.revertedWithPanic("0x32"); // array out of bounds
-
-// Error strings
-await expect(tx).to.be.revertedWith("Error message");
+```solidity
+function test_Deposit_UpdatesBalances() public {}
+function test_RevertWhen_CallerNotOwner() public {}
+function testFuzz_Withdraw(uint256 amount) public {}
+function testFork_SwapOnUniswap() public {}
+function invariant_TotalSupplyMatchesBalances() public {}
 ```
 
-### Standard Revert Reasons Checklist
+### Test Structure
 
-For each function, consider testing these common revert scenarios:
+- Happy paths FIRST, revert cases LAST
+- Test both events AND state changes
+- One logical behavior per test
 
-- [ ] **Pausable** - Function reverts when paused (if applicable)
-- [ ] **Access control** - Unauthorized caller rejected
-- [ ] **Zero address** - Invalid address(0) input rejected
-- [ ] **Zero amount** - Invalid zero value rejected
-- [ ] **Not found** - Resource/entity doesn't exist
-- [ ] **Invalid state** - Wrong state for operation
-- [ ] **Already exists** - Duplicate creation rejected
-- [ ] **Expired/timeout** - Time-based constraints
-- [ ] **Invalid signature** - Signature verification failures
+```solidity
+function test_Deposit_Success() public {
+    uint256 amount = 1e18;
 
-### Test Naming Conventions
+    vm.expectEmit(true, false, false, true);
+    emit Deposited(user, amount);
 
-```typescript
-// Happy path - describe expected behavior
-it("Should transfer tokens to recipient", ...);
-it("Emits Transfer event with correct arguments", ...);
+    vm.prank(user);
+    contract.deposit(amount);
 
-// Revert cases - start with "Reverts when" or describe the constraint
-it("Reverts when caller is not owner", ...);
-it("Reverts when amount exceeds balance", ...);
-```
-
-### Fixture Pattern
-
-```typescript
-async function deployContractFixture() {
-  const [owner, user1, user2] = await ethers.getSigners();
-  const Contract = await ethers.getContractFactory("MyContract");
-  const contract = await Contract.deploy();
-  return { contract, owner, user1, user2 };
+    assertEq(contract.balanceOf(user), amount);
 }
 
-// Usage
-beforeEach(async function () {
-  const { contract, owner } = await loadFixture(deployContractFixture);
-});
+function test_RevertWhen_ZeroAmount() public {
+    vm.expectRevert(abi.encodeWithSelector(InvalidAmount.selector));
+    contract.deposit(0);
+}
 ```
 
-### Testing Both Events and State
+### Fuzz Testing
 
-Always verify both the emitted events AND the resulting state change:
+```solidity
+function testFuzz_Deposit(uint256 amount) public {
+    amount = bound(amount, 1, type(uint128).max);
 
-```typescript
-it("Should update balance and emit event", async function () {
-  const tx = await contract.deposit(amount);
+    vm.prank(user);
+    contract.deposit(amount);
 
-  // Verify event
-  await expect(tx)
-    .to.emit(contract, "Deposited")
-    .withArgs(user.address, amount);
+    assertEq(contract.balanceOf(user), amount);
+}
+```
 
-  // Verify state
-  expect(await contract.balanceOf(user.address)).to.equal(amount);
-});
+### Invariant Testing
+
+```solidity
+contract InvariantTest is Test {
+  Handler handler;
+
+  function setUp() public {
+    handler = new Handler(targetContract);
+    targetContract(address(handler));
+  }
+
+  function invariant_BalancesMatchTotalSupply() public {
+    assertEq(token.totalSupply(), handler.ghost_totalDeposited());
+  }
+}
+
+contract Handler is Test {
+  uint256 public ghost_totalDeposited;
+
+  function deposit(uint256 amount) external {
+    amount = bound(amount, 1, 1e28);
+    target.deposit(amount);
+    ghost_totalDeposited += amount;
+  }
+}
+```
+
+### Fork Testing
+
+```solidity
+function setUp() public {
+  vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), 18_000_000);
+}
+```
+
+### Essential Cheatcodes
+
+| Category   | Cheatcodes                                 |
+| ---------- | ------------------------------------------ |
+| Identity   | `prank`, `startPrank`, `stopPrank`         |
+| State      | `deal`, `store`, `load`                    |
+| Time       | `warp`, `roll`, `skip`                     |
+| Assertions | `expectRevert`, `expectEmit`, `expectCall` |
+| Fuzzing    | `bound`, `assume`                          |
+| Addresses  | `makeAddr`, `makeAddrAndKey`               |
+
+### Debugging
+
+```bash
+forge test -vv     # Show logs
+forge test -vvv    # Show traces for failing tests
+forge test -vvvv   # Show traces for all tests
+forge test -vvvvv  # Show traces + setup
 ```

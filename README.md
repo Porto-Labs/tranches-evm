@@ -3,8 +3,8 @@
 Fixed-rate senior/junior tranching mechanism for yield-bearing assets.
 
 [![License: BUSL-1.1](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](https://spdx.org/licenses/BUSL-1.1.html)
-[![Solidity](https://img.shields.io/badge/Solidity-0.8.23-blue)](https://soliditylang.org/)
-[![Hardhat](https://img.shields.io/badge/Built%20with-Hardhat-orange)](https://hardhat.org/)
+[![Solidity](https://img.shields.io/badge/Solidity-0.8.28-blue)](https://soliditylang.org/)
+[![Foundry](https://img.shields.io/badge/Built%20with-Foundry-orange)](https://getfoundry.sh/)
 
 **Status:** Pre-audit - Not for production use
 
@@ -14,7 +14,18 @@ Fixed-rate senior/junior tranching mechanism for yield-bearing assets.
 
 Porto Tranches splits yield-bearing assets (UA - Underlying Asset) into senior (srUA) and junior (jrUA) tranches at a fixed ratio. Senior receives a fixed target return, junior receives the residual. At maturity, the contract finalizes redemption rates on-chain, enabling unilateral redemption.
 
-For detailed mechanism specification, see our docs.
+For detailed mechanism specification, see [docs/](./docs/).
+
+---
+
+## Prerequisites
+
+- [Foundry](https://getfoundry.sh/) - Install via:
+  ```bash
+  curl -L https://foundry.paradigm.xyz | bash
+  foundryup
+  ```
+- [Node.js](https://nodejs.org/) (v18+) and Yarn
 
 ---
 
@@ -25,11 +36,14 @@ For detailed mechanism specification, see our docs.
 git clone https://github.com/Porto-Labs/tranches-evm
 cd tranches-evm
 
-# Install dependencies
+# Install npm dependencies (OpenZeppelin, Chainlink, Uniswap)
 yarn install
 
-# Compile contracts
-yarn compile
+# Install Foundry dependencies
+forge install
+
+# Build contracts
+forge build
 ```
 
 ---
@@ -38,44 +52,50 @@ yarn compile
 
 ```bash
 # Run all tests
-yarn test
+forge test
+
+# Run with verbosity (show logs)
+forge test -vvv
 
 # Run specific test file
-yarn test test/TrancheMarket.test.ts
+forge test --match-path test/tranche/TrancheMarket.t.sol
+
+# Run specific test function
+forge test --match-test test_Finalize_WithValidReferencePrice
 
 # Run with gas reporting
-REPORT_GAS=true yarn test
+forge test --gas-report
 
-# Run with coverage
-yarn coverage
+# Run coverage
+forge coverage
 ```
 
 ---
 
 ## Development
 
-### Compile Contracts
+### Build Contracts
 
 ```bash
-yarn compile
+forge build
 ```
 
 ### Clean Build Artifacts
 
 ```bash
-yarn clean
-```
-
-### Lint Solidity Code
-
-```bash
-yarn lint
+forge clean
 ```
 
 ### Format Code
 
 ```bash
-yarn format
+forge fmt
+```
+
+### Lint Solidity
+
+```bash
+yarn lint
 ```
 
 ---
@@ -83,15 +103,32 @@ yarn format
 ## Project Structure
 
 ```
-contracts/          # Solidity contracts
-  core/            # TrancheMarket, TrancheToken
-  interfaces/      # ITrancheMarket
-  libraries/       # Math and helper libraries
-  errors/          # Error definitions
+src/                    # Solidity contracts
+  core/                 # TrancheMarket, TrancheToken, Router
+  interfaces/           # ITrancheMarket, IRouter
+  libraries/            # PortoMath, SettlementRatioModel
+  errors/               # Error definitions
 
-test/              # Test files
-docs/              # Technical documentation
+test/                   # Foundry tests
+  tranche/              # TrancheMarket tests
+  invariants/           # Invariant tests
+  mocks/                # Mock contracts
+
+docs/                   # Technical documentation
 ```
+
+---
+
+## Configuration
+
+Key settings in `foundry.toml`:
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `solc` | 0.8.28 | Solidity compiler version |
+| `evm_version` | cancun | EVM version (transient storage support) |
+| `optimizer_runs` | 1,000,000 | Optimizer iterations |
+| `via_ir` | true | IR-based compilation |
 
 ---
 

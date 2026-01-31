@@ -1,6 +1,5 @@
 # Porto Tranches - Implementation Progress
 
-**Repository:** /Users/kotashki/Documents/dev/porto/tranches-evm
 **Spec:** [docs/porto_tranching_layer.md](docs/porto_tranching_layer.md)
 **Last Updated:** 2026-01-30
 

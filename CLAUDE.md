@@ -19,7 +19,7 @@
 src/           - Production contracts
 test/          - Foundry tests (.t.sol)
 test/mocks/    - Mock contracts for testing
-lib/           - Git submodule dependencies (forge-std, OpenZeppelin, Chainlink, Uniswap)
+lib/           - Git submodule dependencies
 script/        - Deployment scripts
 ```
 

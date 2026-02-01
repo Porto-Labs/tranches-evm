@@ -101,8 +101,16 @@ interface IRouter {
      * @param uaIn Amount of UA to deposit
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
+     * @param flashLoanPool Pool to borrow UA from (address(0) = default UA/SR pool)
+     * @param flashLoanToken Paired token in the flash loan pool (address(0) = srToken)
      */
-    function buyJunior(uint256 uaIn, uint256 minJrOut, uint256 deadline) external;
+    function buyJunior(
+        uint256 uaIn,
+        uint256 minJrOut,
+        uint256 deadline,
+        address flashLoanPool,
+        address flashLoanToken
+    ) external;
 
     /**
      * @notice Sell junior tranche tokens for UA using flash swap
@@ -144,8 +152,16 @@ interface IRouter {
      * @param srIn Amount of senior tokens to swap
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
+     * @param flashLoanPool Pool to borrow UA from (address(0) = default UA/SR pool)
+     * @param flashLoanToken Paired token in the flash loan pool (address(0) = srToken)
      */
-    function swapSeniorToJunior(uint256 srIn, uint256 minJrOut, uint256 deadline) external;
+    function swapSeniorToJunior(
+        uint256 srIn,
+        uint256 minJrOut,
+        uint256 deadline,
+        address flashLoanPool,
+        address flashLoanToken
+    ) external;
 
     // ============ View Functions ============
 

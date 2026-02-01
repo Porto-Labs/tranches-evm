@@ -50,6 +50,9 @@ contract Router is IRouter, IUniswapV3SwapCallback {
     /// @notice Transient flag to verify callback originates from this contract's swap
     bool private transient _swapInitiated;
 
+    /// @notice Transient storage for the pool expected to call back
+    address private transient _expectedCallbackPool;
+
     // ============ Modifiers ============
 
     /// @notice Ensures transaction is executed before deadline
@@ -169,11 +172,15 @@ contract Router is IRouter, IUniswapV3SwapCallback {
      * @param uaIn Amount of UA to deposit
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
+     * @param flashLoanPool Pool to borrow UA from (address(0) = default UA/SR pool)
+     * @param flashLoanToken Paired token in the flash loan pool (address(0) = srToken)
      */
     function buyJunior(
         uint256 uaIn,
         uint256 minJrOut,
-        uint256 deadline
+        uint256 deadline,
+        address flashLoanPool,
+        address flashLoanToken
     ) external override checkDeadline(deadline) initiateSwap {
         if (uaIn == 0) revert Errors.TrancheZeroAmount();
 
@@ -186,13 +193,21 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         (uint256 expectedSrOut, ) = trancheMarket.previewTranche(uaIn);
         uint256 uaToBorrow = calculateUnderlyingNeeded(expectedSrOut);
 
+        // Determine which pool and token to use for flash loan
+        IUniswapV3Pool targetPool = flashLoanPool == address(0)
+            ? uniswapPool
+            : IUniswapV3Pool(flashLoanPool);
+        address pairedToken = flashLoanToken == address(0) ? srAddress : flashLoanToken;
+        
+        _expectedCallbackPool = address(targetPool);
+
         // Initiate flash swap to borrow UA from pool
-        bool uaIsToken0 = uaAddress < srAddress;
+        bool uaIsToken0 = uaAddress < pairedToken;
         bool zeroForOne = !uaIsToken0;
 
         bytes memory data = abi.encode(msg.sender, uaIn, minJrOut, SwapOperation.BUY_JUNIOR);
 
-        uniswapPool.swap({
+        targetPool.swap({
             recipient: address(this),
             zeroForOne: zeroForOne,
             // forge-lint: disable-next-line(unsafe-typecast)
@@ -296,11 +311,15 @@ contract Router is IRouter, IUniswapV3SwapCallback {
      * @param srIn Amount of senior tokens to swap
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
+     * @param flashLoanPool Pool to borrow UA from (address(0) = default UA/SR pool)
+     * @param flashLoanToken Paired token in the flash loan pool (address(0) = srToken)
      */
     function swapSeniorToJunior(
         uint256 srIn,
         uint256 minJrOut,
-        uint256 deadline
+        uint256 deadline,
+        address flashLoanPool,
+        address flashLoanToken
     ) external override checkDeadline(deadline) initiateSwap {
         if (srIn == 0) revert Errors.TrancheZeroAmount();
 
@@ -312,13 +331,20 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         // Calculate UA to borrow
         uint256 uaToBorrow = calculateUnderlyingNeeded(srIn);
 
+        // Determine which pool and token to use for flash loan
+        IUniswapV3Pool targetPool = flashLoanPool == address(0)
+            ? uniswapPool
+            : IUniswapV3Pool(flashLoanPool);
+        address pairedToken = flashLoanToken == address(0) ? srAddress : flashLoanToken;
+        _expectedCallbackPool = address(targetPool);
+
         // Initiate flash swap to borrow UA from pool
-        bool uaIsToken0 = uaAddress < srAddress;
+        bool uaIsToken0 = uaAddress < pairedToken;
         bool zeroForOne = !uaIsToken0;
 
         bytes memory data = abi.encode(msg.sender, srIn, minJrOut, SwapOperation.SWAP_SENIOR_TO_JUNIOR);
 
-        uniswapPool.swap({
+        targetPool.swap({
             recipient: address(this),
             zeroForOne: zeroForOne,
             // forge-lint: disable-next-line(unsafe-typecast)
@@ -340,8 +366,10 @@ contract Router is IRouter, IUniswapV3SwapCallback {
         int256 amount1Delta,
         bytes calldata data
     ) external override {
-        if (msg.sender != address(uniswapPool) || !_swapInitiated) revert RouterUnauthorizedCallback();
+        address expectedPool = _expectedCallbackPool == address(0) ? address(uniswapPool) : _expectedCallbackPool;
+        if (msg.sender != expectedPool || !_swapInitiated) revert RouterUnauthorizedCallback();
         _swapInitiated = false;
+        _expectedCallbackPool = address(0);
 
         (address user, uint256 amount, uint256 minOut, SwapOperation operation) = abi.decode(
             data,

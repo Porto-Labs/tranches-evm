@@ -8,6 +8,7 @@ import { TrancheToken } from "src/core/TrancheToken.sol";
 import { Router } from "src/core/Router.sol";
 import { ERC20Mock } from "../mocks/ERC20Mock.sol";
 import { MockChainlinkAggregator } from "../mocks/MockChainlinkAggregator.sol";
+import { IMorphoBase, MarketParams } from "@morpho-blue/interfaces/IMorpho.sol";
 
 interface IPositionManager {
     struct MintParams {
@@ -51,16 +52,22 @@ abstract contract BaseForkTest is Test {
     uint256 constant LP_PRIME_AMOUNT = 3_625_000e18;
     uint256 constant LP_SR_AMOUNT = 3_625_000e18;
 
+    uint256 constant MORPHO_LIQUIDITY = 30_000_000e18;
+    uint256 constant MORPHO_SR_LIQUIDITY = 30_000_000e18;
+
     uint24 constant POOL_FEE = 500;
 
     address constant UNISWAP_V3_POSITION_MANAGER_SEPOLIA = 0x1238536071E1c677A632429e3655c799b22cDA52;
     address constant UNISWAP_V3_SWAP_ROUTER_SEPOLIA = 0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E;
+    address constant MORPHO_SEPOLIA = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
 
     ERC20Mock public prime;
+    ERC20Mock public usdc;
     MockChainlinkAggregator public oracle;
     TrancheMarket public market;
     Router public router;
     address public uniswapPool;
+    address public morpho;
 
     address public admin;
     address public liquidityProvider;
@@ -85,6 +92,7 @@ abstract contract BaseForkTest is Test {
     function _deployTrancheMarket() internal {
         TrancheMarket.MarketParams memory params = TrancheMarket.MarketParams({
             ua: address(prime),
+            poolFee: POOL_FEE,
             expiry: block.timestamp + MATURITY,
             seniorRatio: SENIOR_RATIO,
             admin: admin,
@@ -174,8 +182,37 @@ abstract contract BaseForkTest is Test {
         vm.stopPrank();
     }
 
+    // NOTE: In fork tests we impersonate Morpho owner to enable IRM/LLTV.
+    // In production deployment, use pre-enabled IRM/LLTV values from Morpho governance.
+    function _setupMorphoMarket() internal {
+        morpho = MORPHO_SEPOLIA;
+        IMorphoBase morphoContract = IMorphoBase(morpho);
+        uint256 lltv = 0.945e18;
+
+        address morphoOwner = morphoContract.owner();
+        vm.startPrank(morphoOwner);
+        morphoContract.enableIrm(address(0));
+        morphoContract.enableLltv(lltv);
+        vm.stopPrank();
+
+        usdc = new ERC20Mock("USD Coin", "USDC");
+
+        MarketParams memory primeMarketParams = MarketParams({
+            loanToken: address(prime),
+            collateralToken: address(usdc),
+            oracle: address(0),
+            irm: address(0),
+            lltv: lltv
+        });
+        morphoContract.createMarket(primeMarketParams);
+
+        prime.mint(address(this), MORPHO_LIQUIDITY);
+        prime.approve(morpho, MORPHO_LIQUIDITY);
+        morphoContract.supply(primeMarketParams, MORPHO_LIQUIDITY, 0, address(this), "");
+    }
+
     function _deployRouter() internal {
-        router = new Router(UNISWAP_V3_SWAP_ROUTER_SEPOLIA, address(market), uniswapPool, POOL_FEE);
+        router = new Router(UNISWAP_V3_SWAP_ROUTER_SEPOLIA, address(market), morpho);
     }
 
     function _setOraclePrice(uint256 price18Decimals) internal {

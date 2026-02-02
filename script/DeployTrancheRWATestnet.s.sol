@@ -53,6 +53,7 @@ contract DeployTrancheRWATestnet is Script {
     address constant UNISWAP_V3_FACTORY_SEPOLIA = 0x0227628f3F023bb0B980b67D528571c95c6DaC1c;
     address constant UNISWAP_V3_POSITION_MANAGER_SEPOLIA = 0x1238536071E1c677A632429e3655c799b22cDA52;
     address constant UNISWAP_V3_SWAP_ROUTER_SEPOLIA = 0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E;
+    address constant MORPHO_SEPOLIA = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
 
     ERC20Mock public prime;
     MockChainlinkAggregator public oracle;
@@ -78,7 +79,6 @@ contract DeployTrancheRWATestnet is Script {
         _liquidityProviderTranche();
         _createUniswapPool();
         _addLiquidity();
-
         
         vm.stopBroadcast();
 
@@ -106,6 +106,7 @@ contract DeployTrancheRWATestnet is Script {
 
         TrancheMarket.MarketParams memory params = TrancheMarket.MarketParams({
             ua: address(prime),
+            poolFee: POOL_FEE,
             expiry: block.timestamp + MATURITY, // + 1 hour
             seniorRatio: SENIOR_RATIO,
             admin: msg.sender,
@@ -259,8 +260,7 @@ contract DeployTrancheRWATestnet is Script {
         router = new Router(
             UNISWAP_V3_SWAP_ROUTER_SEPOLIA,
             address(market),
-            uniswapPool,
-            POOL_FEE
+            MORPHO_SEPOLIA
         );
 
         console.log("Router deployed at:", address(router));

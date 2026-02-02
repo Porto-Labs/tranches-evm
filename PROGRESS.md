@@ -67,6 +67,7 @@ Building a tranching mechanism (UA → srUA + jrUA) for yield-bearing assets.
 | ⬚    | Replace `MockChainlinkAggregator` with real Chainlink price feed                     | TODO   |
 | ⬚    | Set appropriate `sqrtPriceX96` if pool ratio is not 1:1                              | TODO   |
 | ⬚    | Configure admin address (currently deployer)                                         | TODO   |
+| ⬚    | Enable IRM and LLTV on Morpho for flash loan market (requires Morpho governance)     | TODO   |
 
 ---
 

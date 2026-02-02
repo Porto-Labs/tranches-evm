@@ -38,6 +38,7 @@ contract TrancheMarketTest is Test {
     function _defaultMarketParams() internal view returns (TrancheMarket.MarketParams memory) {
         return TrancheMarket.MarketParams({
             ua: address(ua),
+            poolFee: 500,
             expiry: block.timestamp + MONTH,
             seniorRatio: 0.7e18,
             admin: admin,

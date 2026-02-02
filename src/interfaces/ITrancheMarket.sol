@@ -212,10 +212,11 @@ interface ITrancheMarket {
     /// @return uaAddress Underlying Asset token address
     /// @return srAddress Senior tranche token address
     /// @return jrAddress Junior tranche token address
+    /// @return poolFee Uniswap V3 pool fee tier
     function getSwapParameters()
         external
         view
-        returns (address uaAddress, address srAddress, address jrAddress);
+        returns (address uaAddress, address srAddress, address jrAddress, uint24 poolFee);
 
     /**
      * @notice Preview the amounts of senior and junior tokens that would be minted for a given UA input

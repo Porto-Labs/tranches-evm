@@ -32,6 +32,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      */
     struct MarketParams {
         address ua;
+        uint24 poolFee;
         uint256 expiry;
         uint256 seniorRatio;
         address admin;
@@ -47,6 +48,9 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
 
     /// @notice Underlying Asset token (internal - use ua() getter for external access)
     IERC20 internal immutable _uaToken;
+
+    /// @notice Uniswap V3 pool fee tier (e.g., 500 = 0.05%)
+    uint24 internal immutable _poolFee;
 
     /// @notice Senior tranche token (internal - use srToken() getter for external access)
     TrancheToken internal immutable _srTokenContract;
@@ -142,6 +146,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         if (params.seniorFloor > params.seniorTarget) revert Errors.SettlementInvalidYieldRange();
 
         _uaToken = IERC20(params.ua);
+        _poolFee = params.poolFee;
         expiry = params.expiry;
         seniorRatio = params.seniorRatio;
         juniorRatio = ONE - params.seniorRatio;
@@ -516,13 +521,14 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     /// @return uaAddress Underlying Asset token address
     /// @return srAddress Senior tranche token address
     /// @return jrAddress Junior tranche token address
+    /// @return poolFee Uniswap V3 pool fee tier
     function getSwapParameters()
         external
         view
         override
-        returns (address uaAddress, address srAddress, address jrAddress)
+        returns (address uaAddress, address srAddress, address jrAddress, uint24 poolFee)
     {
-        return (address(_uaToken), address(_srTokenContract), address(_jrTokenContract));
+        return (address(_uaToken), address(_srTokenContract), address(_jrTokenContract), _poolFee);
     }
 
     /**

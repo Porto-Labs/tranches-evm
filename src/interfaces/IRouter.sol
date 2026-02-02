@@ -62,7 +62,7 @@ interface IRouter {
     /// @notice Thrown when transaction deadline has passed
     error RouterDeadlineExpired();
 
-    /// @notice Thrown when callback caller is not the Uniswap pool
+    /// @notice Thrown when callback caller is not Morpho
     error RouterUnauthorizedCallback();
 
     /// @notice Thrown when output is less than minimum required
@@ -92,34 +92,27 @@ interface IRouter {
 
     /**
      * @notice Buy junior tranche tokens by depositing UA
-     * @dev Flash swap strategy:
+     * @dev Flash loan strategy:
      *      1. Transfer UA from user
-     *      2. Initiate flash swap to borrow UA from Uniswap pool
+     *      2. Borrow additional UA from Morpho flash loan
      *      3. In callback: Tranche (user UA + borrowed UA) into Senior + Junior
      *      4. In callback: Swap Senior tokens for UA to repay flash loan
      *      5. In callback: Send Junior tokens to user
      * @param uaIn Amount of UA to deposit
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
-     * @param flashLoanPool Pool to borrow UA from (address(0) = default UA/SR pool)
-     * @param flashLoanToken Paired token in the flash loan pool (address(0) = srToken)
      */
-    function buyJunior(
-        uint256 uaIn,
-        uint256 minJrOut,
-        uint256 deadline,
-        address flashLoanPool,
-        address flashLoanToken
-    ) external;
+    function buyJunior(uint256 uaIn, uint256 minJrOut, uint256 deadline) external;
 
     /**
-     * @notice Sell junior tranche tokens for UA using flash swap
-     * @dev Flash swap strategy:
+     * @notice Sell junior tranche tokens for UA using flash loan
+     * @dev Flash loan strategy:
      *      1. Transfer junior tokens from user
-     *      2. Initiate flash swap to borrow SR tokens from Uniswap pool
-     *      3. In callback: Redeem SR + JR for UA via TrancheMarket
-     *      4. In callback: Repay pool with the UA owed
-     *      5. In callback: Send remaining UA profit to user
+     *      2. Borrow UA from Morpho flash loan
+     *      3. In callback: Swap UA for SR on Uniswap
+     *      4. In callback: Redeem SR + JR for UA via TrancheMarket
+     *      5. In callback: Repay borrowed UA to Morpho
+     *      6. In callback: Send remaining UA profit to user
      * @param jrIn Amount of junior tokens to sell
      * @param minUaOut Minimum amount of UA to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
@@ -128,13 +121,14 @@ interface IRouter {
 
     /**
      * @notice Swap junior tranche tokens for senior tranche tokens
-     * @dev Flash swap strategy:
+     * @dev Flash loan strategy:
      *      1. Transfer junior tokens from user
-     *      2. Initiate flash swap to borrow SR tokens from Uniswap pool
-     *      3. In callback: Redeem SR + JR for UA via TrancheMarket
-     *      4. In callback: Swap all UA for SR tokens
-     *      5. In callback: Repay borrowed SR to pool
-     *      6. In callback: Send remaining SR to user
+     *      2. Borrow UA from Morpho flash loan
+     *      3. In callback: Swap UA for SR on Uniswap
+     *      4. In callback: Redeem SR + JR for UA via TrancheMarket
+     *      5. In callback: Repay borrowed UA to Morpho
+     *      6. In callback: Swap remaining UA for SR
+     *      7. In callback: Send SR to user
      * @param jrIn Amount of junior tokens to swap
      * @param minSrOut Minimum amount of senior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
@@ -143,25 +137,17 @@ interface IRouter {
 
     /**
      * @notice Swap senior tranche tokens for junior tranche tokens
-     * @dev Flash swap strategy:
+     * @dev Flash loan strategy:
      *      1. Transfer senior tokens from user
-     *      2. Initiate flash swap to borrow UA from Uniswap pool
+     *      2. Borrow UA from Morpho flash loan
      *      3. In callback: Tranche borrowed UA into SR + JR
      *      4. In callback: Sell (user SR + minted SR) for UA to repay flash loan
      *      5. In callback: Send minted JR to user
      * @param srIn Amount of senior tokens to swap
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
-     * @param flashLoanPool Pool to borrow UA from (address(0) = default UA/SR pool)
-     * @param flashLoanToken Paired token in the flash loan pool (address(0) = srToken)
      */
-    function swapSeniorToJunior(
-        uint256 srIn,
-        uint256 minJrOut,
-        uint256 deadline,
-        address flashLoanPool,
-        address flashLoanToken
-    ) external;
+    function swapSeniorToJunior(uint256 srIn, uint256 minJrOut, uint256 deadline) external;
 
     // ============ View Functions ============
 

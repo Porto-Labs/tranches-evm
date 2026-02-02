@@ -33,6 +33,7 @@ contract TrancheMarketInvariantsTest is Test {
 
             TrancheMarket.MarketParams memory params = TrancheMarket.MarketParams({
                 ua: address(testUa),
+                poolFee: 500,
                 expiry: block.timestamp + MONTH,
                 seniorRatio: 0.7e18,
                 admin: admin,
@@ -81,6 +82,7 @@ contract TrancheMarketInvariantsTest is Test {
 
         TrancheMarket.MarketParams memory params = TrancheMarket.MarketParams({
             ua: address(ua),
+            poolFee: 500,
             expiry: block.timestamp + MONTH,
             seniorRatio: 0.8e18,
             admin: admin,

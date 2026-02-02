@@ -6,9 +6,12 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 import { IV3SwapRouter } from "@uniswap/swap-router-contracts/contracts/interfaces/IV3SwapRouter.sol";
 import { IMorphoBase } from "@morpho-blue/interfaces/IMorpho.sol";
 import { IMorphoFlashLoanCallback } from "@morpho-blue/interfaces/IMorphoCallbacks.sol";
+import { IUniswapV3Pool } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import { IUniswapV3Factory } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import { ITrancheMarket } from "../interfaces/ITrancheMarket.sol";
 import { IRouter } from "../interfaces/IRouter.sol";
 import { Errors } from "../errors/Errors.sol";
+import { console } from "forge-std/console.sol";
 
 /**
  * @title Router
@@ -34,6 +37,9 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
     /// @notice Uniswap V3 Swap Router
     IV3SwapRouter public immutable swapRouter;
 
+    /// @notice Uniswap V3 Factory for pool lookups
+    IUniswapV3Factory public immutable uniswapFactory;
+
     /// @notice TrancheMarket contract
     ITrancheMarket public immutable trancheMarket;
 
@@ -51,6 +57,12 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
         _;
     }
 
+    /// @notice Ensures callback is called from Morpho
+    modifier onlyMorpho() {
+        if (msg.sender != address(morpho)) revert RouterUnauthorizedCallback();
+        _;
+    }
+
     /// @notice Sets flag to authorize the Morpho callback
     modifier initiateFlashLoan() {
         _flashLoanInitiated = true;
@@ -62,15 +74,17 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
     /**
      * @notice Creates a new Router contract
      * @param _swapRouter Uniswap V3 SwapRouter address
+     * @param _uniswapFactory Uniswap V3 Factory address
      * @param _trancheMarket TrancheMarket contract address
      * @param _morpho Morpho Blue contract address
      */
-    constructor(address _swapRouter, address _trancheMarket, address _morpho) {
-        if (_swapRouter == address(0) || _trancheMarket == address(0) || _morpho == address(0)) {
+    constructor(address _swapRouter, address _uniswapFactory, address _trancheMarket, address _morpho) {
+        if (_swapRouter == address(0) || _uniswapFactory == address(0) || _trancheMarket == address(0) || _morpho == address(0)) {
             revert Errors.ZeroAddress();
         }
 
         swapRouter = IV3SwapRouter(_swapRouter);
+        uniswapFactory = IUniswapV3Factory(_uniswapFactory);
         trancheMarket = ITrancheMarket(_trancheMarket);
         morpho = IMorphoBase(_morpho);
     }
@@ -271,7 +285,6 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
 
         IERC20(srAddress).safeTransferFrom(msg.sender, address(this), srIn);
 
-        // Calculate UA to borrow
         uint256 uaToBorrow = calculateUnderlyingNeeded(srIn);
 
         bytes memory data = abi.encode(msg.sender, srIn, minJrOut, SwapOperation.SWAP_SENIOR_TO_JUNIOR);
@@ -285,9 +298,8 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param assets Amount of assets borrowed
      * @param data Encoded callback data
      */
-    function onMorphoFlashLoan(uint256 assets, bytes calldata data) external override {
-        // TODO: onlyMorpho modifier
-        if (msg.sender != address(morpho) || !_flashLoanInitiated) revert RouterUnauthorizedCallback();
+    function onMorphoFlashLoan(uint256 assets, bytes calldata data) external onlyMorpho override {
+        if (!_flashLoanInitiated) revert RouterUnauthorizedCallback();
         _flashLoanInitiated = false;
 
         (address user, uint256 amount, uint256 minOut, SwapOperation operation) = abi.decode(
@@ -326,7 +338,6 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
         address jrAddress,
         uint24 poolFee
     ) internal {
-        // Swap borrowed UA for SR on Uniswap
         uint256 srNeeded = calculateSeniorNeeded(jrIn);
 
         IERC20(uaAddress).forceApprove(address(swapRouter), uaBorrowed);
@@ -343,22 +354,19 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
 
         uint256 uaSpentOnSwap = swapRouter.exactOutputSingle(swapParams);
 
-        // Recombine SR + user's JR into UA
         IERC20(srAddress).forceApprove(address(trancheMarket), srNeeded);
         IERC20(jrAddress).forceApprove(address(trancheMarket), jrIn);
 
         uint256 uaFromRecombine = trancheMarket.recombine(srNeeded, jrIn, address(this));
 
-        // Total UA available = UA from recombine + unused borrowed UA
         uint256 totalUa = uaFromRecombine + (uaBorrowed - uaSpentOnSwap);
-
-        // Repay borrowed UA to Morpho
         if (totalUa < uaBorrowed + minUaOut) revert InsufficientOutput();
 
         IERC20(uaAddress).forceApprove(address(morpho), uaBorrowed);
 
         // Send remaining UA profit to user
         uint256 uaToUser = totalUa - uaBorrowed;
+
         IERC20(uaAddress).safeTransfer(user, uaToUser);
 
         emit SellJunior(user, jrIn, uaToUser);
@@ -382,13 +390,11 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
         address jrAddress,
         uint24 poolFee
     ) internal {
-        // Tranche (user UA + borrowed UA) into SR + JR
         uint256 totalUa = uaIn + uaBorrowed;
 
         IERC20(uaAddress).forceApprove(address(trancheMarket), totalUa);
         (uint256 srMinted, uint256 jrMinted) = trancheMarket.tranche(totalUa, address(this));
 
-        // Sell SR for UA to repay flash loan
         IERC20(srAddress).forceApprove(address(swapRouter), srMinted);
 
         IV3SwapRouter.ExactOutputSingleParams memory swapParams = IV3SwapRouter.ExactOutputSingleParams({
@@ -404,7 +410,6 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
         // TODO: dust amount can remain in contract
         swapRouter.exactOutputSingle(swapParams);
 
-        // Approve Morpho to pull UA for repayment
         IERC20(uaAddress).forceApprove(address(morpho), uaBorrowed);
 
         if (jrMinted < minJrOut) revert InsufficientOutput();
@@ -431,7 +436,6 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
         address jrAddress,
         uint24 poolFee
     ) internal {
-        // Swap borrowed UA for SR on Uniswap
         uint256 srNeeded = calculateSeniorNeeded(jrIn);
 
         IERC20(uaAddress).forceApprove(address(swapRouter), uaBorrowed);
@@ -454,13 +458,10 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
 
         uint256 uaFromRecombine = trancheMarket.recombine(srNeeded, jrIn, address(this));
 
-        // Total UA available = UA from recombine + unused borrowed UA
         uint256 totalUa = uaFromRecombine + (uaBorrowed - uaSpentOnSwap);
-
-        // Repay borrowed UA to Morpho
+ 
         IERC20(uaAddress).forceApprove(address(morpho), uaBorrowed);
 
-        // Swap remaining UA for SR to send to user
         uint256 remainingUa = totalUa - uaBorrowed;
 
         IERC20(uaAddress).forceApprove(address(swapRouter), remainingUa);
@@ -492,20 +493,17 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
         address user,
         uint256 srIn,
         uint256 minJrOut,
-        uint256 uaBorrowed,
+        uint256 uaBorrowed, // 10,000
         address uaAddress,
         address srAddress,
         address jrAddress,
         uint24 poolFee
     ) internal {
-        // Tranche borrowed UA into SR + JR
         IERC20(uaAddress).forceApprove(address(trancheMarket), uaBorrowed);
         (uint256 srMinted, uint256 jrMinted) = trancheMarket.tranche(uaBorrowed, address(this));
-
-        // Total SR = user's SR + minted SR
+    
         uint256 totalSr = srIn + srMinted;
 
-        // Sell SR for exactly uaBorrowed UA to repay the flash loan
         IERC20(srAddress).forceApprove(address(swapRouter), totalSr);
 
         IV3SwapRouter.ExactOutputSingleParams memory swapParams = IV3SwapRouter.ExactOutputSingleParams({
@@ -518,10 +516,9 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
             sqrtPriceLimitX96: 0
         });
 
-        // TODO: dust amount can remain in contract
-        swapRouter.exactOutputSingle(swapParams);
+        uint256 srSpentOnSwap = swapRouter.exactOutputSingle(swapParams);
+        console.log("srDust (unused):", (totalSr - srSpentOnSwap) / 1e18);
 
-        // Approve Morpho to pull UA for repayment
         IERC20(uaAddress).forceApprove(address(morpho), uaBorrowed);
 
         if (jrMinted < minJrOut) revert InsufficientOutput();

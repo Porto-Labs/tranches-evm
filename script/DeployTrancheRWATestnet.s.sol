@@ -259,6 +259,7 @@ contract DeployTrancheRWATestnet is Script {
 
         router = new Router(
             UNISWAP_V3_SWAP_ROUTER_SEPOLIA,
+            UNISWAP_V3_FACTORY_SEPOLIA,
             address(market),
             MORPHO_SEPOLIA
         );

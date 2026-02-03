@@ -387,23 +387,26 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
 
         IERC20(srAddress).forceApprove(address(swapRouter), srMinted);
 
-        IV3SwapRouter.ExactOutputSingleParams memory swapParams = IV3SwapRouter.ExactOutputSingleParams({
+        IV3SwapRouter.ExactInputSingleParams memory swapParams = IV3SwapRouter.ExactInputSingleParams({
             tokenIn: srAddress,
             tokenOut: uaAddress,
             fee: poolFee,
             recipient: address(this),
-            amountOut: uaBorrowed,
-            amountInMaximum: srMinted,
+            amountIn: srMinted,
+            amountOutMinimum: uaBorrowed,
             sqrtPriceLimitX96: 0
         });
 
-        // TODO: dust amount can remain in contract
-        uint256 uaReceived = swapRouter.exactOutputSingle(swapParams);
-
-        IERC20(uaAddress).forceApprove(address(morpho), uaBorrowed);
+        uint256 uaReceived = swapRouter.exactInputSingle(swapParams);
 
         if (jrMinted < minJrOut) revert InsufficientOutput();
+
+        IERC20(uaAddress).forceApprove(address(morpho), uaBorrowed);
         IERC20(jrAddress).safeTransfer(user, jrMinted);
+
+        if (uaReceived > uaBorrowed) {
+            IERC20(uaAddress).safeTransfer(user, uaReceived - uaBorrowed);
+        }
 
         emit BuyJunior(user, uaIn, jrMinted);
     }

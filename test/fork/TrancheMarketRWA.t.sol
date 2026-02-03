@@ -93,6 +93,10 @@ contract TrancheMarketRWATest is BaseForkTest {
         uint256 swapAmount,
         uint256 userSlippageBps
     ) internal view returns (uint256 uaToBorrow, uint256 minJrOut) {
+        //@note Do we need uaAmtOut = quoteExactInputSingle(srUAToken, uaToken, fee, srIn, 0)
+        // for calculating of the P_sr = uaAmtOut / srIn, since we have
+        // seniorPrice from pool.slot0();
+
         address srToken = market.srToken();
 
         IUniswapV3Pool pool = IUniswapV3Pool(uniswapPool);
@@ -111,9 +115,73 @@ contract TrancheMarketRWATest is BaseForkTest {
         uint256 expectedJrOut = (swapAmount * seniorPrice) / juniorPrice;
         minJrOut = expectedJrOut * userSlippageBps / 10000;
 
+        // uaToBorrow = (srIn × P_sr) / (1 - srWeight × P_sr)
         uint256 denominator = 1e18 - (SENIOR_RATIO * seniorPrice / 1e18);
         uaToBorrow = (swapAmount * seniorPrice) / denominator;
-        uaToBorrow = uaToBorrow * 99 / 100;
+
+        uaToBorrow = uaToBorrow * 99 / 100; // 1% buffer
+    }
+
+    function _calculateFromUaInput(
+        uint256 uaIn,
+        uint256 userSlippageBps
+    ) internal view returns (uint256 uaToBorrow, uint256 minJrOut) {
+        address srToken = market.srToken();
+
+        IUniswapV3Pool pool = IUniswapV3Pool(uniswapPool);
+        (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+
+        uint256 seniorPrice;
+        if (address(prime) < srToken) {
+            seniorPrice = (uint256(1) << 192) * 1e18 / (uint256(sqrtPriceX96) * uint256(sqrtPriceX96));
+        } else {
+            seniorPrice = (uint256(sqrtPriceX96) * uint256(sqrtPriceX96) * 1e18) >> 192;
+        }
+
+        uint256 R = (SENIOR_RATIO * 1e18) / JUNIOR_RATIO;
+        uint256 juniorPrice = (1e18 + R) - (seniorPrice * R / 1e18);
+
+        // jrOut = uaIn / P_jr
+        uint256 expectedJrOut = uaIn * 1e18 / juniorPrice;
+        minJrOut = expectedJrOut * userSlippageBps / 10000;
+
+        // uaToBorrow = (uaIn × srWeight × P_sr) / (1 - srWeight × P_sr)
+        uint256 denominator = 1e18 - (SENIOR_RATIO * seniorPrice / 1e18);
+        uaToBorrow = (uaIn * SENIOR_RATIO / 1e18 * seniorPrice) / denominator;
+
+        uaToBorrow = uaToBorrow * 99 / 100; // 1% buffer
+    }
+
+    function _calculateFromJrInput(
+        uint256 jrIn,
+        uint256 userSlippageBps
+    ) internal view returns (uint256 uaToBorrow, uint256 minUaOut) {
+        address srToken = market.srToken();
+
+        IUniswapV3Pool pool = IUniswapV3Pool(uniswapPool);
+        (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+
+        uint256 seniorPrice;
+        if (address(prime) < srToken) {
+            seniorPrice = (uint256(1) << 192) * 1e18 / (uint256(sqrtPriceX96) * uint256(sqrtPriceX96));
+        } else {
+            seniorPrice = (uint256(sqrtPriceX96) * uint256(sqrtPriceX96) * 1e18) >> 192;
+        }
+
+        // srNeeded = jrIn × R (where R = srWeight/jrWeight)
+        uint256 srNeeded = jrIn * SENIOR_RATIO / JUNIOR_RATIO;
+
+        // uaToBorrow = srNeeded / P_sr (to buy senior on Uniswap)
+        uaToBorrow = srNeeded * 1e18 / seniorPrice;
+
+        // uaFromRedeem = jrIn / jrWeight
+        uint256 uaFromRedeem = jrIn * 1e18 / JUNIOR_RATIO;
+
+        // expectedUaOut = uaFromRedeem - uaToBorrow
+        uint256 expectedUaOut = uaFromRedeem - uaToBorrow;
+        minUaOut = expectedUaOut * userSlippageBps / 10000;
+
+        uaToBorrow = uaToBorrow * 101 / 100; // 1% buffer (borrow slightly more to ensure we can buy enough SR)
     }
 
     // ============ Tests ============
@@ -194,8 +262,6 @@ contract TrancheMarketRWATest is BaseForkTest {
         address srToken = market.srToken();
         uint256 sellAmount = 10_000e18;
 
-        IUniswapV3Pool pool = IUniswapV3Pool(uniswapPool);
-
         uint256 userSrBefore = IERC20(srToken).balanceOf(user1);
         uint256 userPrimeBefore = prime.balanceOf(user1);
         uint256 poolPrimeBefore = prime.balanceOf(uniswapPool);
@@ -248,39 +314,30 @@ contract TrancheMarketRWATest is BaseForkTest {
     // Pool Liquidity = [-1000t, 1000t], 5 Million liquidity PRIME/srPRIME
     // Pool ratio: 0.98:1 (PRIME/srPRIME) after price adjustment
     // Input:       10,000 PRIME
-    // Output:           jrPRIME
-    // UA dust: 
+    // Output:      9,901  jrPRIME
+    // minJrOut: 	9,774  jrPRIME (2% slippage
+    // UA dust:     52     PRIME
     function test_BuyJunior_Success() public {
         // forge test --match-test test_BuyJunior_Success -vvv
         address jrToken = market.jrToken();
-        address srToken = market.srToken();
         address uaToken = market.uaToken();
-        
+
         address buyUser = makeAddr("buyJuniorUser");
         uint256 buyAmount = 10_000e18; // uaIn
         prime.mint(buyUser, buyAmount);
 
-        // Off-chain logic
-        (uint256 srAmount,) = market.previewTranche(buyAmount);
-        
         // Move the ratio to 0.98
         _adjustPoolPriceBySellingSr(51_000e18);
 
         uint256 userSlippage = 9800; // 2%
 
-        // Fail test
-        //@note too low uaToBorrow, it should be bigger
-        (uint256 uaToBorrow, uint256 minJrOut) = _calculateUnderlyingToBorrow(srAmount, userSlippage);
-
-        // uaToBorrow += 100e18;
+        (uint256 uaToBorrow, uint256 minJrOut) = _calculateFromUaInput(buyAmount, userSlippage);
 
         console.log("=== OFF-CHAIN CALCULATION ===");
         console.log("minJrOut (with 2% slippage):", minJrOut / 1e18);
         console.log("uaToBorrow:", uaToBorrow / 1e18);
 
         uint256 userJrBefore = IERC20(jrToken).balanceOf(buyUser);
-        uint256 userSrBefore = IERC20(srToken).balanceOf(buyUser);
-        uint256 userUaBefore = IERC20(uaToken).balanceOf(buyUser);
 
         vm.startPrank(buyUser);
         prime.approve(address(router), buyAmount);
@@ -288,12 +345,12 @@ contract TrancheMarketRWATest is BaseForkTest {
         vm.stopPrank();
 
         uint256 userJrAfter = IERC20(jrToken).balanceOf(buyUser);
-        uint256 userSrAfter = IERC20(srToken).balanceOf(buyUser);
         uint256 userUaAfter = IERC20(uaToken).balanceOf(buyUser);
 
         console.log("=== CHANGES ===");
-        console.log("PRIME spent:", (userUaBefore - userUaAfter) / 1e18);
+        console.log("UA input:", buyAmount / 1e18);
         console.log("jrPRIME received:", (userJrAfter - userJrBefore) / 1e18);
+        console.log("Dust UA received:", userUaAfter / 1e18);
 
         assertGt(userJrAfter - userJrBefore, 0);
     }

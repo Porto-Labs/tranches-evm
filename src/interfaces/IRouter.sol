@@ -145,11 +145,11 @@ interface IRouter {
      *      4. In callback: Sell (user SR + minted SR) for UA to repay flash loan
      *      5. In callback: Send minted JR to user
      * @param srIn Amount of senior tokens to swap
+    * @param uaToBorrow Amount of UA to borrow from flash loan (calculated off-chain)
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
-     * @param uaToBorrow Amount of UA to borrow from flash loan (calculated off-chain)
      * @param deadline Transaction deadline timestamp
      */
-    function swapSeniorToJunior(uint256 srIn, uint256 minJrOut, uint256 uaToBorrow, uint256 deadline) external;
+    function swapSeniorToJunior(uint256 srIn, uint256 uaToBorrow, uint256 minJrOut, uint256 deadline) external;
 
     // ============ View Functions ============
 

@@ -48,9 +48,9 @@ abstract contract BaseForkTest is Test {
 
     uint256 constant INITIAL_PRICE = 1.02e18;
 
-    uint256 constant PRIME_TO_TRANCHE = 5_000_000e18;
-    uint256 constant LP_PRIME_AMOUNT = 3_625_000e18;
-    uint256 constant LP_SR_AMOUNT = 3_625_000e18;
+    uint256 constant PRIME_TO_TRANCHE = 7_000_000e18;
+    uint256 constant LP_PRIME_AMOUNT = 5_000_000e18;
+    uint256 constant LP_SR_AMOUNT = 5_000_000e18;
 
     uint256 constant MORPHO_LIQUIDITY = 30_000_000e18;
     uint256 constant MORPHO_SR_LIQUIDITY = 30_000_000e18;
@@ -60,6 +60,7 @@ abstract contract BaseForkTest is Test {
     address constant UNISWAP_V3_POSITION_MANAGER_SEPOLIA = 0x1238536071E1c677A632429e3655c799b22cDA52;
     address constant UNISWAP_V3_SWAP_ROUTER_SEPOLIA = 0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E;
     address constant UNISWAP_V3_FACTORY_SEPOLIA = 0x0227628f3F023bb0B980b67D528571c95c6DaC1c;
+    address constant UNISWAP_V3_QUOTER_V2_SEPOLIA = 0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3;
     address constant MORPHO_SEPOLIA = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
 
     ERC20Mock public prime;
@@ -162,8 +163,9 @@ abstract contract BaseForkTest is Test {
             amount1Desired = LP_PRIME_AMOUNT;
         }
 
-        int24 tickLower = -887220;
-        int24 tickUpper = 887220;
+        // todo: determine initial ticks based on price
+        int24 tickLower = -1000;  // -887220
+        int24 tickUpper = 1000;   // 887220
 
         IPositionManager.MintParams memory params = IPositionManager.MintParams({
             token0: token0,

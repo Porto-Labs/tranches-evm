@@ -99,10 +99,11 @@ interface IRouter {
      *      4. In callback: Swap Senior tokens for UA to repay flash loan
      *      5. In callback: Send Junior tokens to user
      * @param uaIn Amount of UA to deposit
+     * @param uaToBorrow Amount of UA to borrow from flash loan (calculated off-chain)
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
      */
-    function buyJunior(uint256 uaIn, uint256 minJrOut, uint256 deadline) external;
+    function buyJunior(uint256 uaIn, uint256 uaToBorrow, uint256 minJrOut, uint256 deadline) external;
 
     /**
      * @notice Sell junior tranche tokens for UA using flash loan
@@ -145,9 +146,10 @@ interface IRouter {
      *      5. In callback: Send minted JR to user
      * @param srIn Amount of senior tokens to swap
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
+     * @param uaToBorrow Amount of UA to borrow from flash loan (calculated off-chain)
      * @param deadline Transaction deadline timestamp
      */
-    function swapSeniorToJunior(uint256 srIn, uint256 minJrOut, uint256 deadline) external;
+    function swapSeniorToJunior(uint256 srIn, uint256 minJrOut, uint256 uaToBorrow, uint256 deadline) external;
 
     // ============ View Functions ============
 

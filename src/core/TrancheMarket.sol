@@ -46,7 +46,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
 
     // ============ Immutables ============
 
-    /// @notice Underlying Asset token (internal - use ua() getter for external access)
+    /// @notice Underlying Asset token (internal - use uaToken() getter for external access)
     IERC20 internal immutable _uaToken;
 
     /// @notice Uniswap V3 pool fee tier (e.g., 500 = 0.05%)
@@ -498,7 +498,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     // ============ View Functions ============
 
     /// @notice Returns the Underlying Asset token address
-    function ua() external view override returns (address) {
+    function uaToken() external view override returns (address) {
         return address(_uaToken);
     }
 

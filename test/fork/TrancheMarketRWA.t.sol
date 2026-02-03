@@ -9,6 +9,20 @@ import { IRouter } from "src/interfaces/IRouter.sol";
 import { Errors } from "src/errors/Errors.sol";
 import { console } from "forge-std/Test.sol";
 
+interface IQuoterV2 {
+    struct QuoteExactInputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        uint256 amountIn;
+        uint24 fee;
+        uint160 sqrtPriceLimitX96;
+    }
+
+    function quoteExactInputSingle(
+        QuoteExactInputSingleParams memory params
+    ) external returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate);
+}
+
 contract TrancheMarketRWATest is BaseForkTest {
     address public user1;
     address public user2;
@@ -27,7 +41,7 @@ contract TrancheMarketRWATest is BaseForkTest {
         _setupLiquidityProvider();
         _createUniswapPool();
 
-        // 3,625,000 srPRIME : 3,625,000 PRIME
+        // 5,000,000 srPRIME : 5,000,000 PRIME
         _addLiquidity(); // Setup UniswapV3 PRIME/srPRIME pool with initial liquidity
 
         _setupMorphoMarket(); // Setup Morpho PRIME/USDC market
@@ -59,6 +73,50 @@ contract TrancheMarketRWATest is BaseForkTest {
         market.tranche(user3Deposit, user3);
         vm.stopPrank();
     }
+
+    // ============ Off-chain helpers ============
+    function _adjustPoolPriceBySellingSr(uint256 sellAmount) internal {
+        address srToken = market.srToken();
+        address priceAdjuster = makeAddr("priceAdjuster");
+
+        prime.mint(priceAdjuster, sellAmount * 2);
+        vm.startPrank(priceAdjuster);
+        prime.approve(address(market), sellAmount * 2);
+        market.tranche(sellAmount * 2, priceAdjuster);
+
+        IERC20(srToken).approve(address(router), sellAmount);
+        router.sellSenior(sellAmount, 0, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function _calculateUnderlyingToBorrow(
+        uint256 swapAmount,
+        uint256 userSlippageBps
+    ) internal view returns (uint256 uaToBorrow, uint256 minJrOut) {
+        address srToken = market.srToken();
+
+        IUniswapV3Pool pool = IUniswapV3Pool(uniswapPool);
+        (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+
+        uint256 seniorPrice;
+        if (address(prime) < srToken) {
+            seniorPrice = (uint256(1) << 192) * 1e18 / (uint256(sqrtPriceX96) * uint256(sqrtPriceX96));
+        } else {
+            seniorPrice = (uint256(sqrtPriceX96) * uint256(sqrtPriceX96) * 1e18) >> 192;
+        }
+
+        uint256 R = (SENIOR_RATIO * 1e18) / JUNIOR_RATIO;
+        uint256 juniorPrice = (1e18 + R) - (seniorPrice * R / 1e18);
+
+        uint256 expectedJrOut = (swapAmount * seniorPrice) / juniorPrice;
+        minJrOut = expectedJrOut * userSlippageBps / 10000;
+
+        uint256 denominator = 1e18 - (SENIOR_RATIO * seniorPrice / 1e18);
+        uaToBorrow = (swapAmount * seniorPrice) / denominator;
+        uaToBorrow = uaToBorrow * 99 / 100;
+    }
+
+    // ============ Tests ============
 
     function test_SetupComplete() public view {
         TrancheToken srToken = TrancheToken(market.srToken());
@@ -187,310 +245,97 @@ contract TrancheMarketRWATest is BaseForkTest {
 
     // ============ BuyJunior Tests ============
 
-    // User deposits 10,000 PRIME and receives ~5,500 jrPRIME via Morpho flash loan.
-    // The leverage math:
-    // 1. User provides uaIn = 10,000 PRIME
-    // 2. expectedSrOut = uaIn × seniorRatio = 10,000 × 0.725 = 7,250 srPRIME
-    // 3. uaToBorrow = expectedSrOut / seniorRatio = 7,250 / 0.725 = 10,000 PRIME (equals uaIn)
-    // 4. Total tranched = uaIn + uaToBorrow = 20,000 PRIME
-    // 5. Junior received = totalTranched × juniorRatio = 20,000 × 0.275 = 5,500 jrPRIME
-    // 6. Senior minted (14,500 srPRIME) is sold on Uniswap to repay the flash loan
+    // Pool Liquidity = [-1000t, 1000t], 5 Million liquidity PRIME/srPRIME
+    // Pool ratio: 0.98:1 (PRIME/srPRIME) after price adjustment
+    // Input:       10,000 PRIME
+    // Output:           jrPRIME
+    // UA dust: 
     function test_BuyJunior_Success() public {
-        address buyUser = makeAddr("buyJuniorUser");
+        // forge test --match-test test_BuyJunior_Success -vvv
         address jrToken = market.jrToken();
         address srToken = market.srToken();
-        uint256 buyAmount = 10_000e18;
+        address uaToken = market.uaToken();
+        
+        address buyUser = makeAddr("buyJuniorUser");
+        uint256 buyAmount = 10_000e18; // uaIn
         prime.mint(buyUser, buyAmount);
 
-        uint256 userJrBefore = IERC20(jrToken).balanceOf(buyUser);
-        uint256 userPrimeBefore = prime.balanceOf(buyUser);
-        uint256 poolPrimeBefore = prime.balanceOf(uniswapPool);
-        uint256 poolSrBefore = IERC20(srToken).balanceOf(uniswapPool);
+        // Off-chain logic
+        (uint256 srAmount,) = market.previewTranche(buyAmount);
+        
+        // Move the ratio to 0.98
+        _adjustPoolPriceBySellingSr(51_000e18);
 
-        console.log("=== BEFORE BUY JUNIOR ===");
-        console.log("User PRIME balance:", userPrimeBefore / 1e18);
-        console.log("User jrPRIME balance:", userJrBefore / 1e18);
-        console.log("Pool PRIME balance:", poolPrimeBefore / 1e18);
-        console.log("Pool srPRIME balance:", poolSrBefore / 1e18);
+        uint256 userSlippage = 9800; // 2%
+
+        // Fail test
+        //@note too low uaToBorrow, it should be bigger
+        (uint256 uaToBorrow, uint256 minJrOut) = _calculateUnderlyingToBorrow(srAmount, userSlippage);
+
+        // uaToBorrow += 100e18;
+
+        console.log("=== OFF-CHAIN CALCULATION ===");
+        console.log("minJrOut (with 2% slippage):", minJrOut / 1e18);
+        console.log("uaToBorrow:", uaToBorrow / 1e18);
+
+        uint256 userJrBefore = IERC20(jrToken).balanceOf(buyUser);
+        uint256 userSrBefore = IERC20(srToken).balanceOf(buyUser);
+        uint256 userUaBefore = IERC20(uaToken).balanceOf(buyUser);
 
         vm.startPrank(buyUser);
-        uint256 gasBefore = gasleft();
-
         prime.approve(address(router), buyAmount);
-        router.buyJunior(buyAmount, 0, block.timestamp + 1 hours);
-
-        uint256 gasUsed = gasBefore - gasleft();
-        console.log("Gas used for buyJunior:", gasUsed);
-
+        router.buyJunior(buyAmount, uaToBorrow, minJrOut, block.timestamp + 1 minutes);
         vm.stopPrank();
 
         uint256 userJrAfter = IERC20(jrToken).balanceOf(buyUser);
-        uint256 userPrimeAfter = prime.balanceOf(buyUser);
-        uint256 poolPrimeAfter = prime.balanceOf(uniswapPool);
-        uint256 poolSrAfter = IERC20(srToken).balanceOf(uniswapPool);
+        uint256 userSrAfter = IERC20(srToken).balanceOf(buyUser);
+        uint256 userUaAfter = IERC20(uaToken).balanceOf(buyUser);
 
-        console.log("");
-        console.log("=== AFTER BUY JUNIOR ===");
-        console.log("User PRIME balance:", userPrimeAfter / 1e18);
-        console.log("User jrPRIME balance:", userJrAfter / 1e18);
-        console.log("Pool PRIME balance:", poolPrimeAfter / 1e18);
-        console.log("Pool srPRIME balance:", poolSrAfter / 1e18);
-
-        console.log("");
         console.log("=== CHANGES ===");
-        console.log("PRIME spent:", (userPrimeBefore - userPrimeAfter) / 1e18);
+        console.log("PRIME spent:", (userUaBefore - userUaAfter) / 1e18);
         console.log("jrPRIME received:", (userJrAfter - userJrBefore) / 1e18);
 
         assertGt(userJrAfter - userJrBefore, 0);
     }
 
-    // ============ SellJunior Tests ============
-
-    // User sells 5,500 jrPRIME and receives PRIME via Morpho flash loan.
-    // Test starts with pool ratio adjusted to ~1.05:1 (PRIME/srPRIME) by executing a buySenior first.
-    // The sellJunior math at 1.05:1 ratio:
-    // 1. User provides jrIn = 5,500 jrPRIME
-    // 2. srNeeded = jrIn × seniorRatio / juniorRatio = 5,500 × 0.725 / 0.275 = 14,500 srPRIME
-    // 3. uaToBorrow = srNeeded / seniorRatio = 14,500 / 0.725 = 20,000 PRIME
-    // 4. Swap PRIME for 14,500 srPRIME on Uniswap (exactOutput) - costs ~15,225 PRIME at 1.05:1
-    // 5. Recombine 14,500 srPRIME + 5,500 jrPRIME = 20,000 PRIME
-    // 6. totalUa = 20,000 + (20,000 - 15,225) = 24,775 PRIME
-    // 7. uaToUser = 24,775 - 20,000 = ~4,775 PRIME
-    function test_SellJunior_Success() public {
-        // Pool ratio: ~1.05:1 (PRIME/srPRIME) after price adjustment
-        // Flash loan: Morpho PRIME/USDC market (30M PRIME liquidity)
-        // Input: 5,500 jrPRIME
-        // Output: ~4,701 PRIME
-        address jrToken = market.jrToken();
-        address srToken = market.srToken();
-        uint256 sellAmount = 5_500e18;
-
-        // Move pool ratio to ~1.05:1 by buying srPRIME (adding ~90,000 PRIME to pool)
-        address priceAdjuster = makeAddr("priceAdjuster");
-        uint256 buyAmount = 90_000e18;
-        prime.mint(priceAdjuster, buyAmount);
-
-        vm.startPrank(priceAdjuster);
-        prime.approve(address(router), buyAmount);
-        router.buySenior(buyAmount, 0, block.timestamp + 1 hours);
-        vm.stopPrank();
-
-        uint256 poolPrimeRatio = prime.balanceOf(uniswapPool);
-        uint256 poolSrRatio = IERC20(srToken).balanceOf(uniswapPool);
-        console.log("=== POOL RATIO AFTER ADJUSTMENT ===");
-        console.log("Pool PRIME:", poolPrimeRatio / 1e18);
-        console.log("Pool srPRIME:", poolSrRatio / 1e18);
-        console.log("Ratio (PRIME/srPRIME) x1e18:", (poolPrimeRatio * 1e18) / poolSrRatio);
-
-        uint256 userJrBefore = IERC20(jrToken).balanceOf(user1);
-        uint256 userPrimeBefore = prime.balanceOf(user1);
-        uint256 poolPrimeBefore = prime.balanceOf(uniswapPool);
-        uint256 poolSrBefore = IERC20(srToken).balanceOf(uniswapPool);
-
-        console.log("");
-        console.log("=== BEFORE SELL JUNIOR ===");
-        console.log("User jrPRIME balance:", userJrBefore / 1e18);
-        console.log("User PRIME balance:", userPrimeBefore / 1e18);
-        console.log("Pool PRIME balance:", poolPrimeBefore / 1e18);
-        console.log("Pool srPRIME balance:", poolSrBefore / 1e18);
-
-        vm.startPrank(user1);
-        uint256 gasBefore = gasleft();
-
-        IERC20(jrToken).approve(address(router), sellAmount);
-        router.sellJunior(sellAmount, 0, block.timestamp + 1 hours);
-
-        uint256 gasUsed = gasBefore - gasleft();
-        console.log("Gas used for sellJunior:", gasUsed);
-
-        vm.stopPrank();
-
-        uint256 userJrAfter = IERC20(jrToken).balanceOf(user1);
-        uint256 userPrimeAfter = prime.balanceOf(user1);
-        uint256 poolPrimeAfter = prime.balanceOf(uniswapPool);
-        uint256 poolSrAfter = IERC20(srToken).balanceOf(uniswapPool);
-
-        console.log("");
-        console.log("=== AFTER SELL JUNIOR ===");
-        console.log("User jrPRIME balance:", userJrAfter / 1e18);
-        console.log("User PRIME balance:", userPrimeAfter / 1e18);
-        console.log("Pool PRIME balance:", poolPrimeAfter / 1e18);
-        console.log("Pool srPRIME balance:", poolSrAfter / 1e18);
-
-        console.log("");
-        console.log("=== CHANGES ===");
-        console.log("jrPRIME sold:", (userJrBefore - userJrAfter) / 1e18);
-        console.log("PRIME received:", (userPrimeAfter - userPrimeBefore) / 1e18);
-
-        assertEq(userJrBefore - userJrAfter, sellAmount);
-        assertGt(userPrimeAfter - userPrimeBefore, 0);
-    }
-
-    // ============ SwapJuniorToSenior Tests ============
-
-    // User swaps 11,000 jrPRIME for srPRIME via Morpho flash loan.
-    // Test starts with pool ratio adjusted to ~1.05:1 (PRIME/srPRIME).
-    // The swapJuniorToSenior math:
-    // 1. User provides jrIn = 11,000 jrPRIME
-    // 2. srNeeded = jrIn × seniorRatio / juniorRatio = 11,000 × 0.725 / 0.275 = 29,000 srPRIME
-    // 3. uaToBorrow = srNeeded / seniorRatio = 29,000 / 0.725 = 40,000 PRIME
-    // 4. Swap PRIME for 29,000 srPRIME on Uniswap (exactOutput)
-    // 5. Recombine 29,000 srPRIME + 11,000 jrPRIME = 40,000 PRIME
-    // 6. Repay flash loan, swap remaining UA for SR and send to user
-    function test_SwapJuniorToSenior_Success() public {
-        // Pool ratio: 1.05:1 (PRIME/srPRIME)
-        // Flash loan: Morpho PRIME/USDC market (30M PRIME liquidity)
-        // Input: 11,000 jrPRIME
-        // Output: 8,661 srPRIME
-        address jrToken = market.jrToken();
-        address srToken = market.srToken();
-        uint256 swapAmount = 11_000e18;
-
-        // Move pool ratio to ~1.05:1 by buying srPRIME (adding ~90,000 PRIME to pool)
-        address priceAdjuster = makeAddr("priceAdjuster");
-        uint256 buyAmount = 90_000e18;
-        prime.mint(priceAdjuster, buyAmount);
-
-        vm.startPrank(priceAdjuster);
-        prime.approve(address(router), buyAmount);
-        router.buySenior(buyAmount, 0, block.timestamp + 1 hours);
-        vm.stopPrank();
-
-        uint256 poolPrimeRatio = prime.balanceOf(uniswapPool);
-        uint256 poolSrRatio = IERC20(srToken).balanceOf(uniswapPool);
-        console.log("=== POOL RATIO AFTER ADJUSTMENT ===");
-        console.log("Pool PRIME:", poolPrimeRatio / 1e18);
-        console.log("Pool srPRIME:", poolSrRatio / 1e18);
-        console.log("Ratio (PRIME/srPRIME) x1e18:", (poolPrimeRatio * 1e18) / poolSrRatio);
-
-        uint256 userJrBefore = IERC20(jrToken).balanceOf(user1);
-        uint256 userSrBefore = IERC20(srToken).balanceOf(user1);
-        uint256 userPrimeBefore = prime.balanceOf(user1);
-        uint256 poolPrimeBefore = prime.balanceOf(uniswapPool);
-        uint256 poolSrBefore = IERC20(srToken).balanceOf(uniswapPool);
-
-        console.log("");
-        console.log("=== BEFORE SWAP JUNIOR TO SENIOR ===");
-        console.log("User jrPRIME balance:", userJrBefore / 1e18);
-        console.log("User srPRIME balance:", userSrBefore / 1e18);
-        console.log("User PRIME balance:", userPrimeBefore / 1e18);
-        console.log("Pool PRIME balance:", poolPrimeBefore / 1e18);
-        console.log("Pool srPRIME balance:", poolSrBefore / 1e18);
-
-        vm.startPrank(user1);
-        uint256 gasBefore = gasleft();
-
-        IERC20(jrToken).approve(address(router), swapAmount);
-        router.swapJuniorToSenior(swapAmount, 0, block.timestamp + 1 hours);
-
-        uint256 gasUsed = gasBefore - gasleft();
-        console.log("Gas used for swapJuniorToSenior:", gasUsed);
-
-        vm.stopPrank();
-
-        uint256 userJrAfter = IERC20(jrToken).balanceOf(user1);
-        uint256 userSrAfter = IERC20(srToken).balanceOf(user1);
-        uint256 userPrimeAfter = prime.balanceOf(user1);
-        uint256 poolPrimeAfter = prime.balanceOf(uniswapPool);
-        uint256 poolSrAfter = IERC20(srToken).balanceOf(uniswapPool);
-
-        console.log("");
-        console.log("=== AFTER SWAP JUNIOR TO SENIOR ===");
-        console.log("User jrPRIME balance:", userJrAfter / 1e18);
-        console.log("User srPRIME balance:", userSrAfter / 1e18);
-        console.log("User PRIME balance:", userPrimeAfter / 1e18);
-        console.log("Pool PRIME balance:", poolPrimeAfter / 1e18);
-        console.log("Pool srPRIME balance:", poolSrAfter / 1e18);
-
-        console.log("");
-        console.log("=== CHANGES ===");
-        console.log("jrPRIME swapped:", (userJrBefore - userJrAfter) / 1e18);
-        console.log("srPRIME received:", (userSrAfter - userSrBefore) / 1e18);
-
-        assertEq(userJrBefore - userJrAfter, swapAmount);
-        assertGt(userSrAfter - userSrBefore, 0);
-    }
-
-    // ============ SwapSeniorToJunior Tests ============
-
-    // User swaps 7,250 srPRIME for jrPRIME via Morpho flash loan.
-    // Test starts with pool ratio adjusted to ~1.05:1 (PRIME/srPRIME).
-    // The swapSeniorToJunior math:
-    // 1. User provides srIn = 7,250 srPRIME
-    // 2. uaToBorrow = srIn / seniorRatio = 7,250 / 0.725 = 10,000 PRIME
-    // 3. Tranche 10,000 PRIME into 7,250 srPRIME + 2,750 jrPRIME
-    // 4. totalSr = srIn + srMinted = 7,250 + 7,250 = 14,500 srPRIME
-    // 5. Swap 14,500 srPRIME for exactly 10,000 PRIME on Uniswap (exactOutput)
-    // 6. Send 2,750 jrPRIME to user
+    // Pool Liquidity = [-1000t, 1000t], 5 Million liquidity PRIME/srPRIME
+    // Pool ratio: 0.98:1 (PRIME/srPRIME) after price adjustment
+    // Input:    1,000  srPRIME
+    // Output:   ~986   jrPRIME
+    // UA dust:  8      PRIME 
     function test_SwapSeniorToJunior_Success() public {
-        // Pool ratio: 1.05:1 (PRIME/srPRIME)
-        // Flash loan: Morpho PRIME/USDC market (30M PRIME liquidity)
-        // Input: 7,250 srPRIME
-        // Output: ~2,750 jrPRIME
         address jrToken = market.jrToken();
         address srToken = market.srToken();
-        uint256 swapAmount = 7_250e18;
+        address uaToken = market.uaToken();
+        uint256 swapAmount = 1000e18;
 
-        // Move pool ratio to ~1.05:1 by buying srPRIME (adding ~90,000 PRIME to pool)
-        address priceAdjuster = makeAddr("priceAdjuster");
-        uint256 buyAmount = 90_000e18;
-        prime.mint(priceAdjuster, buyAmount);
+        // Move the ratio to 0.98
+        _adjustPoolPriceBySellingSr(51_000e18);
 
-        vm.startPrank(priceAdjuster);
-        prime.approve(address(router), buyAmount);
-        router.buySenior(buyAmount, 0, block.timestamp + 1 hours);
-        vm.stopPrank();
+        uint256 userSlippage = 9800; // 2% slippage | selected from UI
+        (uint256 uaToBorrow, uint256 minJrOut) = _calculateUnderlyingToBorrow(swapAmount, userSlippage);
 
-        uint256 poolPrimeRatio = prime.balanceOf(uniswapPool);
-        uint256 poolSrRatio = IERC20(srToken).balanceOf(uniswapPool);
-        console.log("=== POOL RATIO AFTER ADJUSTMENT ===");
-        console.log("Pool PRIME:", poolPrimeRatio / 1e18);
-        console.log("Pool srPRIME:", poolSrRatio / 1e18);
-        console.log("Ratio (PRIME/srPRIME) x1e18:", (poolPrimeRatio * 1e18) / poolSrRatio);
+        console.log("=== OFF-CHAIN CALCULATION ===");
+        console.log("minJrOut (with 2% slippage):", minJrOut / 1e18);
+        console.log("uaToBorrow:", uaToBorrow / 1e18);
 
         uint256 userJrBefore = IERC20(jrToken).balanceOf(user1);
         uint256 userSrBefore = IERC20(srToken).balanceOf(user1);
-        uint256 userPrimeBefore = prime.balanceOf(user1);
-        uint256 poolPrimeBefore = prime.balanceOf(uniswapPool);
-        uint256 poolSrBefore = IERC20(srToken).balanceOf(uniswapPool);
-
-        console.log("");
-        console.log("=== BEFORE SWAP SENIOR TO JUNIOR ===");
-        console.log("User srPRIME balance:", userSrBefore / 1e18);
-        console.log("User jrPRIME balance:", userJrBefore / 1e18);
-        console.log("User PRIME balance:", userPrimeBefore / 1e18);
-        console.log("Pool PRIME balance:", poolPrimeBefore / 1e18);
-        console.log("Pool srPRIME balance:", poolSrBefore / 1e18);
+        uint256 userUaBefore = IERC20(uaToken).balanceOf(user1);
 
         vm.startPrank(user1);
-        uint256 gasBefore = gasleft();
-
         IERC20(srToken).approve(address(router), swapAmount);
-        router.swapSeniorToJunior(swapAmount, 0, block.timestamp + 1 hours);
-
-        uint256 gasUsed = gasBefore - gasleft();
-        console.log("Gas used for swapSeniorToJunior:", gasUsed);
-
+        router.swapSeniorToJunior(swapAmount, minJrOut, uaToBorrow, block.timestamp + 1 minutes);
         vm.stopPrank();
 
         uint256 userJrAfter = IERC20(jrToken).balanceOf(user1);
         uint256 userSrAfter = IERC20(srToken).balanceOf(user1);
-        uint256 userPrimeAfter = prime.balanceOf(user1);
-        uint256 poolPrimeAfter = prime.balanceOf(uniswapPool);
-        uint256 poolSrAfter = IERC20(srToken).balanceOf(uniswapPool);
+        uint256 userUaAfter = IERC20(uaToken).balanceOf(user1);
 
-        console.log("");
-        console.log("=== AFTER SWAP SENIOR TO JUNIOR ===");
-        console.log("User srPRIME balance:", userSrAfter / 1e18);
-        console.log("User jrPRIME balance:", userJrAfter / 1e18);
-        console.log("User PRIME balance:", userPrimeAfter / 1e18);
-        console.log("Pool PRIME balance:", poolPrimeAfter / 1e18);
-        console.log("Pool srPRIME balance:", poolSrAfter / 1e18);
-
-        console.log("");
         console.log("=== CHANGES ===");
         console.log("srPRIME swapped:", (userSrBefore - userSrAfter) / 1e18);
         console.log("jrPRIME received:", (userJrAfter - userJrBefore) / 1e18);
+        console.log("Dust UA received:", (userUaAfter - userUaBefore) / 1e18);
 
         assertEq(userSrBefore - userSrAfter, swapAmount);
         assertGt(userJrAfter - userJrBefore, 0);

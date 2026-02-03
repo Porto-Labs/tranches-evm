@@ -157,7 +157,7 @@ interface ITrancheMarket {
     // ============ View Functions ============
 
     /// @notice Returns the Underlying Asset token address
-    function ua() external view returns (address);
+    function uaToken() external view returns (address);
 
     /// @notice Returns the senior tranche token address
     function srToken() external view returns (address);

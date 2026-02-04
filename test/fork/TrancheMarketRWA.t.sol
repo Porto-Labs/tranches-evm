@@ -5,6 +5,7 @@ import { BaseForkTest } from "./BaseForkTest.sol";
 import { TrancheToken } from "src/core/TrancheToken.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IUniswapV3Pool } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { IRouter } from "src/interfaces/IRouter.sol";
 import { Errors } from "src/errors/Errors.sol";
 import { console } from "forge-std/Test.sol";
@@ -396,5 +397,210 @@ contract TrancheMarketRWATest is BaseForkTest {
 
         assertEq(userSrBefore - userSrAfter, swapAmount);
         assertGt(userJrAfter - userJrBefore, 0);
+    }
+
+    function test_ComparePriceEstimationMethods() public {
+        address srToken = market.srToken();
+        IUniswapV3Pool pool = IUniswapV3Pool(uniswapPool);
+        IQuoterV2 quoter = IQuoterV2(UNISWAP_V3_QUOTER_V2_SEPOLIA);
+
+        _adjustPoolPriceBySellingSr(51_000e18);
+
+        address buyUser = makeAddr("buyUser");
+        uint256 uaIn = 10_000e18;
+        prime.mint(buyUser, uaIn);
+
+        (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+
+        uint256 slot0SrOut;
+        if (address(prime) < srToken) {
+            slot0SrOut = Math.mulDiv(Math.mulDiv(uaIn, sqrtPriceX96, 1 << 96), sqrtPriceX96, 1 << 96);
+        } else {
+            slot0SrOut = Math.mulDiv(Math.mulDiv(uaIn, 1 << 96, sqrtPriceX96), 1 << 96, sqrtPriceX96);
+        }
+
+        uint256 slot0WithBufferSrOut = slot0SrOut * 99 / 100;
+
+        IQuoterV2.QuoteExactInputSingleParams memory quoteParams = IQuoterV2.QuoteExactInputSingleParams({
+            tokenIn: address(prime),
+            tokenOut: srToken,
+            amountIn: uaIn,
+            fee: POOL_FEE,
+            sqrtPriceLimitX96: 0
+        });
+        (uint256 quoterSrOut, , , ) = quoter.quoteExactInputSingle(quoteParams);
+
+        vm.startPrank(buyUser);
+        prime.approve(address(router), uaIn);
+        uint256 actualSrOut = router.buySenior(uaIn, 0, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        console.log("=== PRICE ESTIMATION COMPARISON ===");
+        console.log("Input: %s PRIME", uaIn / 1e18);
+        console.log("");
+        console.log("--- SR Output Estimates ---");
+        console.log("slot0 price calculation:    %s", slot0SrOut / 1e18);
+        console.log("slot0 with 1%% buffer:       %s", slot0WithBufferSrOut / 1e18);
+        console.log("Quoter estimate:            %s", quoterSrOut / 1e18);
+        console.log("Actual execution:           %s", actualSrOut / 1e18);
+        console.log("");
+        console.log("--- Differences from Actual ---");
+
+        int256 slot0Diff = int256(slot0SrOut) - int256(actualSrOut);
+        int256 slot0BufferedDiff = int256(slot0WithBufferSrOut) - int256(actualSrOut);
+        int256 quoterDiff = int256(quoterSrOut) - int256(actualSrOut);
+
+        console.log("slot0 vs actual:");
+        if (slot0Diff >= 0) {
+            console.log("  +%s", uint256(slot0Diff) / 1e18);
+        } else {
+            console.log("  -%s", uint256(-slot0Diff) / 1e18);
+        }
+
+        console.log("slot0 buffered vs actual:");
+        if (slot0BufferedDiff >= 0) {
+            console.log("  +%s (BUFFER INSUFFICIENT)", uint256(slot0BufferedDiff) / 1e18);
+        } else {
+            console.log("  -%s (buffer OK)", uint256(-slot0BufferedDiff) / 1e18);
+        }
+
+        console.log("Quoter vs actual:");
+        if (quoterDiff >= 0) {
+            console.log("  +%s", uint256(quoterDiff) / 1e18);
+        } else {
+            console.log("  -%s", uint256(-quoterDiff) / 1e18);
+        }
+
+        console.log("");
+        console.log("--- Percentage Differences ---");
+        uint256 slot0PctDiff = slot0Diff >= 0
+            ? (uint256(slot0Diff) * 10000) / actualSrOut
+            : (uint256(-slot0Diff) * 10000) / actualSrOut;
+        uint256 slot0BufferedPctDiff = slot0BufferedDiff >= 0
+            ? (uint256(slot0BufferedDiff) * 10000) / actualSrOut
+            : (uint256(-slot0BufferedDiff) * 10000) / actualSrOut;
+        uint256 quoterPctDiff = quoterDiff >= 0
+            ? (uint256(quoterDiff) * 10000) / actualSrOut
+            : (uint256(-quoterDiff) * 10000) / actualSrOut;
+
+        console.log("slot0 difference:         %s.%s%s%%", slot0PctDiff / 100, (slot0PctDiff % 100) / 10, slot0PctDiff % 10);
+        console.log("slot0 buffered difference: %s.%s%s%%", slot0BufferedPctDiff / 100, (slot0BufferedPctDiff % 100) / 10, slot0BufferedPctDiff % 10);
+        console.log("Quoter difference:        %s.%s%s%%", quoterPctDiff / 100, (quoterPctDiff % 100) / 10, quoterPctDiff % 10);
+
+        console.log("");
+        console.log("--- Raw Values (18 decimals) ---");
+        console.log("slot0SrOut:           %s", slot0SrOut);
+        console.log("slot0WithBufferSrOut: %s", slot0WithBufferSrOut);
+        console.log("quoterSrOut:          %s", quoterSrOut);
+        console.log("actualSrOut:          %s", actualSrOut);
+    }
+
+    function test_BufferAccuracyAcrossAmounts() public {
+        address srToken = market.srToken();
+        IUniswapV3Pool pool = IUniswapV3Pool(uniswapPool);
+        IQuoterV2 quoter = IQuoterV2(UNISWAP_V3_QUOTER_V2_SEPOLIA);
+
+        _adjustPoolPriceBySellingSr(51_000e18);
+
+        uint256[5] memory amounts = [uint256(1_000e18), 10_000e18, 50_000e18, 100_000e18, 500_000e18];
+
+        console.log("=== BUFFER ACCURACY ANALYSIS ===");
+        console.log("Testing 1%% buffer effectiveness across swap amounts");
+        console.log("Pool state: After selling 51,000 srPRIME (ratio ~0.98:1)");
+        console.log("");
+        console.log("Amount (UA) | slot0 Est | Buffered | Quoter | Actual | slot0 Err | Buffered Err | Buffer OK?");
+        console.log("------------|-----------|----------|--------|--------|-----------|--------------|----------");
+
+        for (uint256 i = 0; i < amounts.length; i++) {
+            uint256 uaIn = amounts[i];
+
+            address buyUser = makeAddr(string(abi.encodePacked("buyer", i)));
+            prime.mint(buyUser, uaIn);
+
+            (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+
+            uint256 slot0SrOut;
+            if (address(prime) < srToken) {
+                slot0SrOut = Math.mulDiv(Math.mulDiv(uaIn, sqrtPriceX96, 1 << 96), sqrtPriceX96, 1 << 96);
+            } else {
+                slot0SrOut = Math.mulDiv(Math.mulDiv(uaIn, 1 << 96, sqrtPriceX96), 1 << 96, sqrtPriceX96);
+            }
+
+            uint256 slot0WithBufferSrOut = slot0SrOut * 99 / 100;
+
+            IQuoterV2.QuoteExactInputSingleParams memory quoteParams = IQuoterV2.QuoteExactInputSingleParams({
+                tokenIn: address(prime),
+                tokenOut: srToken,
+                amountIn: uaIn,
+                fee: POOL_FEE,
+                sqrtPriceLimitX96: 0
+            });
+            (uint256 quoterSrOut, , , ) = quoter.quoteExactInputSingle(quoteParams);
+
+            vm.startPrank(buyUser);
+            prime.approve(address(router), uaIn);
+            uint256 actualSrOut = router.buySenior(uaIn, 0, block.timestamp + 1 hours);
+            vm.stopPrank();
+
+            int256 slot0Err = int256(slot0SrOut) - int256(actualSrOut);
+            int256 bufferedErr = int256(slot0WithBufferSrOut) - int256(actualSrOut);
+
+            uint256 slot0ErrPct = slot0Err >= 0
+                ? (uint256(slot0Err) * 10000) / actualSrOut
+                : (uint256(-slot0Err) * 10000) / actualSrOut;
+            uint256 bufferedErrPct = bufferedErr >= 0
+                ? (uint256(bufferedErr) * 10000) / actualSrOut
+                : (uint256(-bufferedErr) * 10000) / actualSrOut;
+
+            bool bufferOk = bufferedErr <= 0;
+
+            console.log("--- Amount: %s UA ---", uaIn / 1e18);
+            console.log("  slot0 Est:    %s | Buffered: %s", slot0SrOut / 1e18, slot0WithBufferSrOut / 1e18);
+            console.log("  Quoter Est:   %s | Actual:   %s", quoterSrOut / 1e18, actualSrOut / 1e18);
+
+            if (slot0Err >= 0) {
+                console.log("  slot0 Error:  +%s.%s%s%%", slot0ErrPct / 100, (slot0ErrPct % 100) / 10, slot0ErrPct % 10);
+            } else {
+                console.log("  slot0 Error:  -%s.%s%s%%", slot0ErrPct / 100, (slot0ErrPct % 100) / 10, slot0ErrPct % 10);
+            }
+
+            if (bufferedErr >= 0) {
+                console.log("  Buffered Err: +%s.%s%s%% (BUFFER INSUFFICIENT)", bufferedErrPct / 100, (bufferedErrPct % 100) / 10, bufferedErrPct % 10);
+            } else {
+                console.log("  Buffered Err: -%s.%s%s%% (buffer OK)", bufferedErrPct / 100, (bufferedErrPct % 100) / 10, bufferedErrPct % 10);
+            }
+
+            console.log("  Buffer OK: %s", bufferOk ? "YES" : "NO");
+            console.log("");
+        }
+
+        console.log("=== RAW DATA (18 decimals) ===");
+
+        for (uint256 i = 0; i < amounts.length; i++) {
+            uint256 uaIn = amounts[i];
+
+            (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+
+            uint256 slot0SrOut;
+            if (address(prime) < srToken) {
+                slot0SrOut = Math.mulDiv(Math.mulDiv(uaIn, sqrtPriceX96, 1 << 96), sqrtPriceX96, 1 << 96);
+            } else {
+                slot0SrOut = Math.mulDiv(Math.mulDiv(uaIn, 1 << 96, sqrtPriceX96), 1 << 96, sqrtPriceX96);
+            }
+
+            IQuoterV2.QuoteExactInputSingleParams memory quoteParams = IQuoterV2.QuoteExactInputSingleParams({
+                tokenIn: address(prime),
+                tokenOut: srToken,
+                amountIn: uaIn,
+                fee: POOL_FEE,
+                sqrtPriceLimitX96: 0
+            });
+            (uint256 quoterSrOut, , , ) = quoter.quoteExactInputSingle(quoteParams);
+
+            console.log("Amount: %s", uaIn);
+            console.log("  slot0:    %s", slot0SrOut);
+            console.log("  buffered: %s", slot0SrOut * 99 / 100);
+            console.log("  quoter:   %s", quoterSrOut);
+        }
     }
 }

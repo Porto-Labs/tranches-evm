@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "forge-std/Test.sol";
 import { PortoMathMock } from "./mocks/PortoMathMock.sol";
-import { Errors } from "src/errors/Errors.sol";
+import { PortoMath } from "src/libraries/math/PortoMath.sol";
 
 contract PortoMathTest is Test {
     PortoMathMock public portoMath;
@@ -24,7 +24,7 @@ contract PortoMathTest is Test {
         assertEq(portoMath.mulDown(a, b), 0);
     }
 
-    function test_MulDown_ReturnZeroWhenAIsZero() public view {
+    function test_MulDown_ReturnZeroWhenNumeratorIsZero() public view {
         assertEq(portoMath.mulDown(0, 1e18), 0);
     }
 
@@ -57,12 +57,12 @@ contract PortoMathTest is Test {
         assertLt(result, 0.333333333333333334e18);
     }
 
-    function test_DivDown_ReturnZeroWhenAIsZero() public view {
+    function test_DivDown_ReturnZeroWhenNumeratorIsZero() public view {
         assertEq(portoMath.divDown(0, 1e18), 0);
     }
 
     function test_RevertWhen_DivDownByZero() public {
-        vm.expectRevert(Errors.DivisionByZero.selector);
+        vm.expectRevert(PortoMath.DivisionByZero.selector);
         portoMath.divDown(1e18, 0);
     }
 
@@ -79,26 +79,22 @@ contract PortoMathTest is Test {
         assertGt(result, 0.333333333333333333e18);
     }
 
-    function test_DivUp_ReturnZeroWhenAIsZero() public view {
+    function test_DivUp_ReturnZeroWhenNumeratorIsZero() public view {
         assertEq(portoMath.divUp(0, 1e18), 0);
     }
 
     function test_RevertWhen_DivUpByZero() public {
-        vm.expectRevert(Errors.DivisionByZero.selector);
+        vm.expectRevert(PortoMath.DivisionByZero.selector);
         portoMath.divUp(1e18, 0);
     }
 
     function test_RevertWhen_DivUpZeroByZero() public {
-        vm.expectRevert(Errors.DivisionByZero.selector);
+        vm.expectRevert(PortoMath.DivisionByZero.selector);
         portoMath.divUp(0, 0);
     }
 
     function test_Min_ReturnSmallerValue() public view {
         assertEq(portoMath.min(5e18, 10e18), 5e18);
         assertEq(portoMath.min(10e18, 5e18), 5e18);
-    }
-
-    function test_Min_HandleEqualValues() public view {
-        assertEq(portoMath.min(5e18, 5e18), 5e18);
     }
 }

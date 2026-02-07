@@ -49,8 +49,8 @@ abstract contract BaseForkTest is Test {
     uint256 constant INITIAL_PRICE = 1.02e18;
 
     uint256 constant PRIME_TO_TRANCHE = 7_000_000e18;
-    uint256 constant LP_PRIME_AMOUNT = 5_000_000e18;
-    uint256 constant LP_SR_AMOUNT = 5_000_000e18;
+    uint256 constant LP_PRIME_AMOUNT = 3_000_000e18;
+    uint256 constant LP_SR_AMOUNT = 3_000_000e18;
 
     uint256 constant MORPHO_LIQUIDITY = 30_000_000e18;
     uint256 constant MORPHO_SR_LIQUIDITY = 30_000_000e18;
@@ -163,7 +163,6 @@ abstract contract BaseForkTest is Test {
             amount1Desired = LP_PRIME_AMOUNT;
         }
 
-        // todo: determine initial ticks based on price
         int24 tickLower = -1000;  // -887220
         int24 tickUpper = 1000;   // 887220
 
@@ -215,7 +214,7 @@ abstract contract BaseForkTest is Test {
     }
 
     function _deployRouter() internal {
-        router = new Router(UNISWAP_V3_SWAP_ROUTER_SEPOLIA, UNISWAP_V3_FACTORY_SEPOLIA, address(market), morpho);
+        router = new Router(UNISWAP_V3_SWAP_ROUTER_SEPOLIA, morpho);
     }
 
     function _setOraclePrice(uint256 price18Decimals) internal {

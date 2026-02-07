@@ -6,7 +6,7 @@ import { TrancheMarket } from "src/core/TrancheMarket.sol";
 import { TrancheToken } from "src/core/TrancheToken.sol";
 import { ERC20Mock } from "../mocks/ERC20Mock.sol";
 import { MockChainlinkAggregator } from "../mocks/MockChainlinkAggregator.sol";
-import { Errors } from "src/errors/Errors.sol";
+import { ITrancheMarket } from "src/interfaces/ITrancheMarket.sol";
 
 contract TrancheMarketLiquidationTest is Test {
     TrancheMarket public market;
@@ -113,7 +113,7 @@ contract TrancheMarketLiquidationTest is Test {
         TrancheMarket.MarketParams memory params = _liquidationMarketParams();
         params.liquidationBuffer = 0.026e18;
 
-        vm.expectRevert(Errors.LiquidationInvalidBuffer.selector);
+        vm.expectRevert(ITrancheMarket.LiquidationInvalidBuffer.selector);
         new TrancheMarket(params);
     }
 
@@ -121,7 +121,7 @@ contract TrancheMarketLiquidationTest is Test {
         TrancheMarket.MarketParams memory params = _liquidationMarketParams();
         params.liquidationReward = 0.026e18;
 
-        vm.expectRevert(Errors.LiquidationInvalidReward.selector);
+        vm.expectRevert(ITrancheMarket.LiquidationInvalidReward.selector);
         new TrancheMarket(params);
     }
 
@@ -221,7 +221,7 @@ contract TrancheMarketLiquidationTest is Test {
         oracle.setRoundData(50000000, block.timestamp);
 
         vm.prank(admin);
-        vm.expectRevert(Errors.LiquidationNotEnabled.selector);
+        vm.expectRevert(ITrancheMarket.LiquidationNotEnabled.selector);
         disabledMarket.liquidate();
     }
 
@@ -232,7 +232,7 @@ contract TrancheMarketLiquidationTest is Test {
         oracle.setRoundData(100000000, block.timestamp);
 
         vm.prank(admin);
-        vm.expectRevert(Errors.LiquidationConditionNotMet.selector);
+        vm.expectRevert(ITrancheMarket.LiquidationConditionNotMet.selector);
         market.liquidate();
     }
 
@@ -244,7 +244,7 @@ contract TrancheMarketLiquidationTest is Test {
         _setBelowLiquidationPrice();
 
         vm.prank(admin);
-        vm.expectRevert(Errors.LiquidationAfterExpiry.selector);
+        vm.expectRevert(ITrancheMarket.LiquidationAfterExpiry.selector);
         market.liquidate();
     }
 
@@ -258,7 +258,7 @@ contract TrancheMarketLiquidationTest is Test {
         market.liquidate();
 
         vm.prank(admin);
-        vm.expectRevert(Errors.TrancheMarketAlreadyFinalized.selector);
+        vm.expectRevert(ITrancheMarket.TrancheMarketAlreadyFinalized.selector);
         market.liquidate();
     }
 
@@ -269,7 +269,7 @@ contract TrancheMarketLiquidationTest is Test {
         _setBelowLiquidationPrice();
 
         vm.prank(other);
-        vm.expectRevert(Errors.OnlyAdmin.selector);
+        vm.expectRevert(ITrancheMarket.OnlyAdmin.selector);
         market.liquidate();
     }
 

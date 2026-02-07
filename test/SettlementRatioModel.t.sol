@@ -4,7 +4,6 @@ pragma solidity ^0.8.28;
 import { Test } from "forge-std/Test.sol";
 import { SettlementRatioModelMock } from "./mocks/SettlementRatioModelMock.sol";
 import { SettlementRatioModel } from "src/settlement/SettlementRatioModel.sol";
-import { Errors } from "src/errors/Errors.sol";
 
 contract SettlementRatioModelTest is Test {
     SettlementRatioModelMock public settlementModel;
@@ -281,7 +280,7 @@ contract SettlementRatioModelTest is Test {
         SettlementRatioModel.SettlementParams memory params = _defaultParams();
         params.maturityPrice = 0;
 
-        vm.expectRevert(Errors.SettlementZeroPrice.selector);
+        vm.expectRevert(SettlementRatioModel.SettlementZeroPrice.selector);
         settlementModel.calculateSettlement(params);
     }
 
@@ -289,7 +288,7 @@ contract SettlementRatioModelTest is Test {
         SettlementRatioModel.SettlementParams memory params = _defaultParams();
         params.initialPrice = 0;
 
-        vm.expectRevert(Errors.SettlementZeroPrice.selector);
+        vm.expectRevert(SettlementRatioModel.SettlementZeroPrice.selector);
         settlementModel.calculateSettlement(params);
     }
 
@@ -297,7 +296,7 @@ contract SettlementRatioModelTest is Test {
         SettlementRatioModel.SettlementParams memory params = _defaultParams();
         params.uaQuantity = 0;
 
-        vm.expectRevert(Errors.SettlementZeroQuantity.selector);
+        vm.expectRevert(SettlementRatioModel.SettlementZeroQuantity.selector);
         settlementModel.calculateSettlement(params);
     }
 
@@ -305,7 +304,7 @@ contract SettlementRatioModelTest is Test {
         SettlementRatioModel.SettlementParams memory params = _defaultParams();
         params.seniorRatio = 0;
 
-        vm.expectRevert(Errors.SettlementInvalidRatio.selector);
+        vm.expectRevert(SettlementRatioModel.SettlementInvalidRatio.selector);
         settlementModel.calculateSettlement(params);
     }
 
@@ -313,7 +312,7 @@ contract SettlementRatioModelTest is Test {
         SettlementRatioModel.SettlementParams memory params = _defaultParams();
         params.seniorRatio = 1e18;
 
-        vm.expectRevert(Errors.SettlementInvalidRatio.selector);
+        vm.expectRevert(SettlementRatioModel.SettlementInvalidRatio.selector);
         settlementModel.calculateSettlement(params);
     }
 
@@ -322,7 +321,7 @@ contract SettlementRatioModelTest is Test {
         params.seniorFloor = 0.01e18;
         params.seniorTarget = 0.005e18;
 
-        vm.expectRevert(Errors.SettlementInvalidYieldRange.selector);
+        vm.expectRevert(SettlementRatioModel.SettlementInvalidYieldRange.selector);
         settlementModel.calculateSettlement(params);
     }
 }

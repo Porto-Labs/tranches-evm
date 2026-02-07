@@ -2,7 +2,6 @@
 pragma solidity ^0.8.23;
 
 import { PortoMath } from "../libraries/math/PortoMath.sol";
-import { Errors } from "../errors/Errors.sol";
 
 /**
  * @title SettlementRatioModel
@@ -16,6 +15,18 @@ import { Errors } from "../errors/Errors.sol";
  */
 library SettlementRatioModel {
     using PortoMath for uint256;
+
+    /// @notice Thrown when settlement price is zero
+    error SettlementZeroPrice();
+
+    /// @notice Thrown when settlement quantity is zero
+    error SettlementZeroQuantity();
+
+    /// @notice Thrown when settlement ratio is invalid
+    error SettlementInvalidRatio();
+
+    /// @notice Thrown when yield range is invalid (floor exceeds target)
+    error SettlementInvalidYieldRange();
 
     /**
      * @notice Input parameters for settlement calculation
@@ -200,16 +211,16 @@ library SettlementRatioModel {
      */
     function _validateParams(SettlementParams memory params) internal pure {
         if (params.maturityPrice == 0 || params.initialPrice == 0) {
-            revert Errors.SettlementZeroPrice();
+            revert SettlementZeroPrice();
         }
         if (params.uaQuantity == 0) {
-            revert Errors.SettlementZeroQuantity();
+            revert SettlementZeroQuantity();
         }
         if (params.seniorRatio == 0 || params.seniorRatio >= ONE) {
-            revert Errors.SettlementInvalidRatio();
+            revert SettlementInvalidRatio();
         }
         if (params.seniorFloor > params.seniorTarget) {
-            revert Errors.SettlementInvalidYieldRange();
+            revert SettlementInvalidYieldRange();
         }
     }
 }

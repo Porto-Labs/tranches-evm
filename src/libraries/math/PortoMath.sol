@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import { Errors } from "../../errors/Errors.sol";
-
 /**
  * @title PortoMath
  * @notice Minimal fixed-point math library for Porto Tranches
  * @dev All operations use 18 decimal precision (1e18)
  */
 library PortoMath {
+    /// @notice Thrown when attempting to divide by zero
+    error DivisionByZero();
+    
     uint256 internal constant ONE = 1e18; // 18 decimal places
 
     /**
@@ -30,7 +31,7 @@ library PortoMath {
      * @return result The result (18 decimal precision, rounded down)
      */
     function divDown(uint256 a, uint256 b) internal pure returns (uint256) {
-        if (b == 0) revert Errors.DivisionByZero();
+        if (b == 0) revert DivisionByZero();
         return (a * ONE) / b;
     }
 
@@ -55,7 +56,7 @@ library PortoMath {
      * @return result The result (18 decimal precision, rounded up)
      */
     function divUp(uint256 a, uint256 b) internal pure returns (uint256) {
-        if (b == 0) revert Errors.DivisionByZero();
+        if (b == 0) revert DivisionByZero();
         if (a == 0) return 0;
         return ((a * ONE) - 1) / b + 1;
     }

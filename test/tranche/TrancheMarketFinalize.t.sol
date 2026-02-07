@@ -5,8 +5,8 @@ import { Test } from "forge-std/Test.sol";
 import { TrancheMarket } from "src/core/TrancheMarket.sol";
 import { ERC20Mock } from "../mocks/ERC20Mock.sol";
 import { MockChainlinkAggregator } from "../mocks/MockChainlinkAggregator.sol";
-import { Errors } from "src/errors/Errors.sol";
 import { ITrancheMarket } from "src/interfaces/ITrancheMarket.sol";
+import { SettlementRatioModel } from "src/settlement/SettlementRatioModel.sol";
 
 contract TrancheMarketFinalizeTest is Test {
     TrancheMarket public market;
@@ -96,19 +96,19 @@ contract TrancheMarketFinalizeTest is Test {
         oracle.setRoundData(110000000, block.timestamp);
 
         vm.prank(admin);
-        vm.expectRevert(Errors.OraclePriceDeviationExceeded.selector);
+        vm.expectRevert(ITrancheMarket.OraclePriceDeviationExceeded.selector);
         market.finalize(1e18, 0.05e18);
     }
 
     function test_RevertWhen_Finalize_DeviationThresholdExceeds100() public {
         vm.prank(admin);
-        vm.expectRevert(Errors.OracleInvalidDeviationThreshold.selector);
+        vm.expectRevert(ITrancheMarket.OracleInvalidDeviationThreshold.selector);
         market.finalize(1e18, 1.01e18);
     }
 
     function test_RevertWhen_Finalize_ReferencePriceZero() public {
         vm.prank(admin);
-        vm.expectRevert(Errors.SettlementZeroPrice.selector);
+        vm.expectRevert(SettlementRatioModel.SettlementZeroPrice.selector);
         market.finalize(0, 0.01e18);
     }
 
@@ -116,7 +116,7 @@ contract TrancheMarketFinalizeTest is Test {
         oracle.setRoundData(0, block.timestamp);
 
         vm.prank(admin);
-        vm.expectRevert(Errors.OracleInvalidPrice.selector);
+        vm.expectRevert(ITrancheMarket.OracleInvalidPrice.selector);
         market.finalize(1e18, 0.01e18);
     }
 
@@ -124,7 +124,7 @@ contract TrancheMarketFinalizeTest is Test {
         oracle.setRoundData(-100000000, block.timestamp);
 
         vm.prank(admin);
-        vm.expectRevert(Errors.OracleInvalidPrice.selector);
+        vm.expectRevert(ITrancheMarket.OracleInvalidPrice.selector);
         market.finalize(1e18, 0.01e18);
     }
 
@@ -132,7 +132,7 @@ contract TrancheMarketFinalizeTest is Test {
         oracle.setRoundData(100000000, block.timestamp - 25 hours);
 
         vm.prank(admin);
-        vm.expectRevert(Errors.OracleStalePrice.selector);
+        vm.expectRevert(ITrancheMarket.OracleStalePrice.selector);
         market.finalize(1e18, 0.01e18);
     }
 
@@ -140,7 +140,7 @@ contract TrancheMarketFinalizeTest is Test {
         TrancheMarket freshMarket = new TrancheMarket(_defaultMarketParams());
 
         vm.prank(admin);
-        vm.expectRevert(Errors.TrancheMarketNotExpired.selector);
+        vm.expectRevert(ITrancheMarket.TrancheMarketNotExpired.selector);
         freshMarket.finalize(1e18, 0.01e18);
     }
 
@@ -149,13 +149,13 @@ contract TrancheMarketFinalizeTest is Test {
         market.finalize(1e18, 0.01e18);
 
         vm.prank(admin);
-        vm.expectRevert(Errors.TrancheMarketAlreadyFinalized.selector);
+        vm.expectRevert(ITrancheMarket.TrancheMarketAlreadyFinalized.selector);
         market.finalize(1e18, 0.01e18);
     }
 
     function test_RevertWhen_Finalize_NonAdmin() public {
         vm.prank(user);
-        vm.expectRevert(Errors.OnlyAdmin.selector);
+        vm.expectRevert(ITrancheMarket.OnlyAdmin.selector);
         market.finalize(1e18, 0.01e18);
     }
 
@@ -233,14 +233,14 @@ contract TrancheMarketFinalizeTest is Test {
     function test_RevertWhen_PreviewSettlement_InvalidOraclePrice() public {
         oracle.setRoundData(0, block.timestamp);
 
-        vm.expectRevert(Errors.OracleInvalidPrice.selector);
+        vm.expectRevert(ITrancheMarket.OracleInvalidPrice.selector);
         market.previewSettlement();
     }
 
     function test_RevertWhen_PreviewSettlement_StaleOraclePrice() public {
         oracle.setRoundData(100000000, block.timestamp - 25 hours);
 
-        vm.expectRevert(Errors.OracleStalePrice.selector);
+        vm.expectRevert(ITrancheMarket.OracleStalePrice.selector);
         market.previewSettlement();
     }
 }

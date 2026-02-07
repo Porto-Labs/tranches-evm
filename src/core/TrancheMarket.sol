@@ -8,7 +8,6 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 import { AggregatorV3Interface } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import { ITrancheMarket } from "../interfaces/ITrancheMarket.sol";
 import { TrancheToken } from "./TrancheToken.sol";
-import { Errors } from "../errors/Errors.sol";
 import { PortoMath } from "../libraries/math/PortoMath.sol";
 import { SettlementRatioModel } from "../settlement/SettlementRatioModel.sol";
 
@@ -128,7 +127,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @notice Restricts function access to admin only
      */
     modifier onlyAdmin() {
-        if (msg.sender != admin) revert Errors.OnlyAdmin();
+        if (msg.sender != admin) revert OnlyAdmin();
         _;
     }
 
@@ -139,11 +138,11 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @param params Market initialization parameters
      */
     constructor(MarketParams memory params) {
-        if (params.ua == address(0) || params.admin == address(0)) revert Errors.ZeroAddress();
-        if (params.priceFeed == address(0)) revert Errors.ZeroAddress();
-        if (params.expiry <= block.timestamp) revert Errors.TrancheInvalidExpiry();
-        if (params.seniorRatio == 0 || params.seniorRatio >= ONE) revert Errors.TrancheInvalidWeights();
-        if (params.seniorFloor > params.seniorTarget) revert Errors.SettlementInvalidYieldRange();
+        if (params.ua == address(0) || params.admin == address(0)) revert ZeroAddress();
+        if (params.priceFeed == address(0)) revert ZeroAddress();
+        if (params.expiry <= block.timestamp) revert TrancheInvalidExpiry();
+        if (params.seniorRatio == 0 || params.seniorRatio >= ONE) revert TrancheInvalidWeights();
+        if (params.seniorFloor > params.seniorTarget) revert SettlementRatioModel.SettlementInvalidYieldRange();
 
         _uaToken = IERC20(params.ua);
         _poolFee = params.poolFee;
@@ -159,8 +158,8 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         seniorFloor = params.seniorFloor;
         seniorTarget = params.seniorTarget;
 
-        if (params.liquidationBuffer > MAX_LIQUIDATION_PARAM) revert Errors.LiquidationInvalidBuffer();
-        if (params.liquidationReward > MAX_LIQUIDATION_PARAM) revert Errors.LiquidationInvalidReward();
+        if (params.liquidationBuffer > MAX_LIQUIDATION_PARAM) revert LiquidationInvalidBuffer();
+        if (params.liquidationReward > MAX_LIQUIDATION_PARAM) revert LiquidationInvalidReward();
 
         liquidationEnabled = params.liquidationEnabled;
         liquidationBuffer = params.liquidationBuffer;
@@ -203,9 +202,9 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         uint256 uaIn,
         address receiver
     ) external override nonReentrant returns (uint256 srOut, uint256 jrOut) {
-        if (block.timestamp >= expiry) revert Errors.TrancheMarketExpired();
-        if (uaIn == 0) revert Errors.TrancheZeroAmount();
-        if (receiver == address(0)) revert Errors.ZeroAddress();
+        if (block.timestamp >= expiry) revert TrancheMarketExpired();
+        if (uaIn == 0) revert TrancheZeroAmount();
+        if (receiver == address(0)) revert ZeroAddress();
 
         _uaToken.safeTransferFrom(msg.sender, address(this), uaIn);
 
@@ -230,13 +229,13 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         uint256 jrIn,
         address receiver
     ) external override nonReentrant returns (uint256 uaOut) {
-        if (block.timestamp >= expiry) revert Errors.TrancheMarketExpired();
-        if (srIn == 0 || jrIn == 0) revert Errors.TrancheZeroAmount();
-        if (receiver == address(0)) revert Errors.ZeroAddress();
+        if (block.timestamp >= expiry) revert TrancheMarketExpired();
+        if (srIn == 0 || jrIn == 0) revert TrancheZeroAmount();
+        if (receiver == address(0)) revert ZeroAddress();
 
         // Validate ratio: srIn / seniorRatio == jrIn / juniorRatio
         // Equivalent equation without precision loss: srIn * juniorRatio == jrIn * seniorRatio
-        if (srIn.mulDown(juniorRatio) != jrIn.mulDown(seniorRatio)) revert Errors.TrancheRatioMismatch();
+        if (srIn.mulDown(juniorRatio) != jrIn.mulDown(seniorRatio)) revert TrancheRatioMismatch();
 
         _srTokenContract.burn(msg.sender, srIn);
         _jrTokenContract.burn(msg.sender, jrIn);
@@ -258,10 +257,10 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @param deviationThreshold Maximum allowed deviation from oracle price (1e18 precision, e.g., 0.01e18 = 1%)
      */
     function finalize(uint256 referencePrice, uint256 deviationThreshold) external override onlyAdmin nonReentrant {
-        if (block.timestamp < expiry) revert Errors.TrancheMarketNotExpired();
-        if (finalized) revert Errors.TrancheMarketAlreadyFinalized();
-        if (deviationThreshold > 1e18) revert Errors.OracleInvalidDeviationThreshold();
-        if (referencePrice == 0) revert Errors.SettlementZeroPrice();
+        if (block.timestamp < expiry) revert TrancheMarketNotExpired();
+        if (finalized) revert TrancheMarketAlreadyFinalized();
+        if (deviationThreshold > 1e18) revert OracleInvalidDeviationThreshold();
+        if (referencePrice == 0) revert SettlementRatioModel.SettlementZeroPrice();
 
         uint256 oraclePrice = _getOraclePrice();
         uint256 deviation;
@@ -270,7 +269,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         } else {
             deviation = (referencePrice - oraclePrice).divDown(referencePrice);
         }
-        if (deviation > deviationThreshold) revert Errors.OraclePriceDeviationExceeded();
+        if (deviation > deviationThreshold) revert OraclePriceDeviationExceeded();
 
         uint256 uaQuantity = _uaToken.balanceOf(address(this));
         SettlementRatioModel.SettlementParams memory params = SettlementRatioModel.SettlementParams({
@@ -300,9 +299,9 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @return uaOut Amount of UA returned
      */
     function redeemSenior(uint256 srIn, address receiver) external override nonReentrant returns (uint256 uaOut) {
-        if (!finalized) revert Errors.TrancheMarketNotFinalized();
-        if (srIn == 0) revert Errors.TrancheZeroAmount();
-        if (receiver == address(0)) revert Errors.ZeroAddress();
+        if (!finalized) revert TrancheMarketNotFinalized();
+        if (srIn == 0) revert TrancheZeroAmount();
+        if (receiver == address(0)) revert ZeroAddress();
 
         _srTokenContract.burn(msg.sender, srIn);   
         uaOut = srIn.mulDown(srRateUA);
@@ -318,9 +317,9 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @return uaOut Amount of UA returned (may be 0 if jrRateUA is 0)
      */
     function redeemJunior(uint256 jrIn, address receiver) external override nonReentrant returns (uint256 uaOut) {
-        if (!finalized) revert Errors.TrancheMarketNotFinalized();
-        if (jrIn == 0) revert Errors.TrancheZeroAmount();
-        if (receiver == address(0)) revert Errors.ZeroAddress();
+        if (!finalized) revert TrancheMarketNotFinalized();
+        if (jrIn == 0) revert TrancheZeroAmount();
+        if (receiver == address(0)) revert ZeroAddress();
 
         _jrTokenContract.burn(msg.sender, jrIn);
         uaOut = jrIn.mulDown(jrRateUA);
@@ -339,7 +338,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @param _newAdmin The new admin address
      */
     function setAdmin(address _newAdmin) external override onlyAdmin {
-        if (_newAdmin == address(0)) revert Errors.ZeroAddress();
+        if (_newAdmin == address(0)) revert ZeroAddress();
         admin = _newAdmin;
         emit AdminChanged(_newAdmin);
     }
@@ -352,15 +351,15 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @return _liquidatorReward Amount of UA transferred to liquidator
      */
     function liquidate() external override onlyAdmin nonReentrant returns (uint256 _liquidatorReward) {
-        if (!liquidationEnabled) revert Errors.LiquidationNotEnabled();
-        if (block.timestamp >= expiry) revert Errors.LiquidationAfterExpiry();
-        if (finalized) revert Errors.TrancheMarketAlreadyFinalized();
+        if (!liquidationEnabled) revert LiquidationNotEnabled();
+        if (block.timestamp >= expiry) revert LiquidationAfterExpiry();
+        if (finalized) revert TrancheMarketAlreadyFinalized();
 
         uint256 oraclePrice = _getOraclePrice();
-        if (oraclePrice >= liquidationPrice) revert Errors.LiquidationConditionNotMet();
+        if (oraclePrice >= liquidationPrice) revert LiquidationConditionNotMet();
 
         uint256 uaQuantity = _uaToken.balanceOf(address(this));
-        if (uaQuantity == 0) revert Errors.SettlementZeroQuantity();
+        if (uaQuantity == 0) revert SettlementRatioModel.SettlementZeroQuantity();
 
         uint256 srSupply = _srTokenContract.totalSupply();
         uint256 jrSupply = _jrTokenContract.totalSupply();
@@ -486,10 +485,10 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         (, int256 answer, , uint256 updatedAt, ) = _priceFeed.latestRoundData();
 
         // Validate price is positive
-        if (answer <= 0) revert Errors.OracleInvalidPrice();
+        if (answer <= 0) revert OracleInvalidPrice();
 
         // Validate data is not stale
-        if (block.timestamp - updatedAt > STALENESS_THRESHOLD) revert Errors.OracleStalePrice();
+        if (block.timestamp - updatedAt > STALENESS_THRESHOLD) revert OracleStalePrice();
 
         // Scale to 1e18 precision
         price = _scalePrice(answer, _priceFeedDecimals, PROTOCOL_DEFAULT_DECIMALS);

@@ -6,7 +6,8 @@ import { TrancheMarket } from "src/core/TrancheMarket.sol";
 import { TrancheToken } from "src/core/TrancheToken.sol";
 import { ERC20Mock } from "../mocks/ERC20Mock.sol";
 import { MockChainlinkAggregator } from "../mocks/MockChainlinkAggregator.sol";
-import { Errors } from "src/errors/Errors.sol";
+import { ITrancheMarket } from "src/interfaces/ITrancheMarket.sol";
+import { SettlementRatioModel } from "src/settlement/SettlementRatioModel.sol";
 
 contract TrancheMarketTest is Test {
     TrancheMarket public market;
@@ -76,7 +77,7 @@ contract TrancheMarketTest is Test {
         TrancheMarket.MarketParams memory params = _defaultMarketParams();
         params.priceFeed = address(0);
 
-        vm.expectRevert(Errors.ZeroAddress.selector);
+        vm.expectRevert(ITrancheMarket.ZeroAddress.selector);
         new TrancheMarket(params);
     }
 
@@ -87,7 +88,7 @@ contract TrancheMarketTest is Test {
         TrancheMarket.MarketParams memory params = _defaultMarketParams();
         params.priceFeed = address(zeroOracle);
 
-        vm.expectRevert(Errors.OracleInvalidPrice.selector);
+        vm.expectRevert(ITrancheMarket.OracleInvalidPrice.selector);
         new TrancheMarket(params);
     }
 
@@ -96,7 +97,7 @@ contract TrancheMarketTest is Test {
         params.seniorFloor = 0.01e18;
         params.seniorTarget = 0.005e18;
 
-        vm.expectRevert(Errors.SettlementInvalidYieldRange.selector);
+        vm.expectRevert(SettlementRatioModel.SettlementInvalidYieldRange.selector);
         new TrancheMarket(params);
     }
 
@@ -104,7 +105,7 @@ contract TrancheMarketTest is Test {
         TrancheMarket.MarketParams memory params = _defaultMarketParams();
         params.seniorRatio = 0;
 
-        vm.expectRevert(Errors.TrancheInvalidWeights.selector);
+        vm.expectRevert(ITrancheMarket.TrancheInvalidWeights.selector);
         new TrancheMarket(params);
     }
 
@@ -112,7 +113,7 @@ contract TrancheMarketTest is Test {
         TrancheMarket.MarketParams memory params = _defaultMarketParams();
         params.seniorRatio = 1e18;
 
-        vm.expectRevert(Errors.TrancheInvalidWeights.selector);
+        vm.expectRevert(ITrancheMarket.TrancheInvalidWeights.selector);
         new TrancheMarket(params);
     }
 

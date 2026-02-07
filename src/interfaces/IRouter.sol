@@ -68,27 +68,35 @@ interface IRouter {
     /// @notice Thrown when output is less than minimum required
     error InsufficientOutput();
 
+    /// @notice Thrown when a zero address is provided where not allowed
+    error ZeroAddress();
+
+    /// @notice Thrown when input amount is zero
+    error ZeroAmount();
+
     // ============ Core Functions ============
 
     /**
      * @notice Buy senior tranche tokens by depositing UA
      * @dev Strategy: Swap UA for srToken on Uniswap V3 pool
+     * @param market TrancheMarket contract address
      * @param uaIn Amount of UA to deposit
      * @param minSrOut Minimum amount of senior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
      * @return srOut Amount of senior tokens received
      */
-    function buySenior(uint256 uaIn, uint256 minSrOut, uint256 deadline) external returns (uint256 srOut);
+    function buySenior(address market, uint256 uaIn, uint256 minSrOut, uint256 deadline) external returns (uint256 srOut);
 
     /**
      * @notice Sell senior tranche tokens for UA
      * @dev Strategy: Swap srToken for UA on Uniswap V3 pool
+     * @param market TrancheMarket contract address
      * @param srIn Amount of senior tokens to sell
      * @param minUaOut Minimum amount of UA to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
      * @return uaOut Amount of UA received
      */
-    function sellSenior(uint256 srIn, uint256 minUaOut, uint256 deadline) external returns (uint256 uaOut);
+    function sellSenior(address market, uint256 srIn, uint256 minUaOut, uint256 deadline) external returns (uint256 uaOut);
 
     /**
      * @notice Buy junior tranche tokens by depositing UA
@@ -98,12 +106,13 @@ interface IRouter {
      *      3. In callback: Tranche (user UA + borrowed UA) into Senior + Junior
      *      4. In callback: Swap Senior tokens for UA to repay flash loan
      *      5. In callback: Send Junior tokens to user
+     * @param market TrancheMarket contract address
      * @param uaIn Amount of UA to deposit
      * @param uaToBorrow Amount of UA to borrow from flash loan (calculated off-chain)
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
      */
-    function buyJunior(uint256 uaIn, uint256 uaToBorrow, uint256 minJrOut, uint256 deadline) external;
+    function buyJunior(address market, uint256 uaIn, uint256 uaToBorrow, uint256 minJrOut, uint256 deadline) external;
 
     /**
      * @notice Sell junior tranche tokens for UA using flash loan
@@ -114,11 +123,13 @@ interface IRouter {
      *      4. In callback: Redeem SR + JR for UA via TrancheMarket
      *      5. In callback: Repay borrowed UA to Morpho
      *      6. In callback: Send remaining UA profit to user
+     * @param market TrancheMarket contract address
      * @param jrIn Amount of junior tokens to sell
+     * @param uaToBorrow Amount of UA to borrow from flash loan (calculated off-chain)
      * @param minUaOut Minimum amount of UA to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
      */
-    function sellJunior(uint256 jrIn, uint256 minUaOut, uint256 deadline) external;
+    function sellJunior(address market, uint256 jrIn, uint256 uaToBorrow, uint256 minUaOut, uint256 deadline) external;
 
     /**
      * @notice Swap junior tranche tokens for senior tranche tokens
@@ -130,11 +141,13 @@ interface IRouter {
      *      5. In callback: Repay borrowed UA to Morpho
      *      6. In callback: Swap remaining UA for SR
      *      7. In callback: Send SR to user
+     * @param market TrancheMarket contract address
      * @param jrIn Amount of junior tokens to swap
+     * @param uaToBorrow Amount of UA to borrow from flash loan (calculated off-chain)
      * @param minSrOut Minimum amount of senior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
      */
-    function swapJuniorToSenior(uint256 jrIn, uint256 minSrOut, uint256 deadline) external;
+    function swapJuniorToSenior(address market, uint256 jrIn, uint256 uaToBorrow, uint256 minSrOut, uint256 deadline) external;
 
     /**
      * @notice Swap senior tranche tokens for junior tranche tokens
@@ -144,26 +157,22 @@ interface IRouter {
      *      3. In callback: Tranche borrowed UA into SR + JR
      *      4. In callback: Sell (user SR + minted SR) for UA to repay flash loan
      *      5. In callback: Send minted JR to user
+     * @param market TrancheMarket contract address
      * @param srIn Amount of senior tokens to swap
-    * @param uaToBorrow Amount of UA to borrow from flash loan (calculated off-chain)
+     * @param uaToBorrow Amount of UA to borrow from flash loan (calculated off-chain)
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
      */
-    function swapSeniorToJunior(uint256 srIn, uint256 uaToBorrow, uint256 minJrOut, uint256 deadline) external;
+    function swapSeniorToJunior(address market, uint256 srIn, uint256 uaToBorrow, uint256 minJrOut, uint256 deadline) external;
 
     // ============ View Functions ============
 
     /**
      * @notice Calculate the amount of senior tokens needed to match junior tokens for recombination
      * @param jrAmount Amount of junior tokens
+     * @param market TrancheMarket contract address
      * @return srNeeded Amount of senior tokens needed
      */
-    function calculateSeniorNeeded(uint256 jrAmount) external view returns (uint256 srNeeded);
+    function calculateSeniorNeeded(uint256 jrAmount, address market) external view returns (uint256 srNeeded);
 
-    /**
-     * @notice Calculate the amount of underlying tokens needed to create a given amount of senior tokens
-     * @param srAmount Amount of senior tokens
-     * @return uaNeeded Amount of underlying tokens needed
-     */
-    function calculateUnderlyingNeeded(uint256 srAmount) external view returns (uint256 uaNeeded);
 }

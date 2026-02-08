@@ -76,37 +76,59 @@ contract TrancheMarketRWATest is BaseForkTest {
         vm.stopPrank();
     }
 
-    function _calculateUnderlyingToBorrow(
+    function _calculateFromSrInput(
         uint256 srIn,
         uint256 userSlippageBps
     ) internal returns (uint256 uaToBorrow, uint256 minJrOut) {
-        //note is it going to work better with slot price? quoter apply fee
-        address srToken = market.srToken();
-        IQuoterV2 quoter = IQuoterV2(UNISWAP_V3_QUOTER_V2_SEPOLIA);
+        // On-chain: totalSr = srIn + uaBorrowed * seniorRatio
+        //   uaReceived = swap(totalSr) must >= uaBorrowed
+        //
+        // Closed-form: uaToBorrow = srIn * P_eff / (1 - seniorRatio * P_eff)
+        // where P_eff = effective SR price after swap impact (from quoter)
+        //
+        // Steps:
+        // 1) Get spot price, compute initial uaToBorrow estimate
+        // 2) Compute totalSr at that estimate, quote the swap → get effective price
+        // 3) Recompute uaToBorrow using the effective price (closed-form)
 
-        IQuoterV2.QuoteExactInputSingleParams memory quoteParams = IQuoterV2.QuoteExactInputSingleParams({
-            tokenIn: srToken,
-            tokenOut: address(prime),
-            amountIn: srIn,
-            fee: POOL_FEE,
-            sqrtPriceLimitX96: 0
-        });
-        (uint256 uaAmtOut, , , ) = quoter.quoteExactInputSingle(quoteParams);
+        uint256 effectivePrice;
+        {
+            address srToken = market.srToken();
 
-        uint256 seniorPrice = uaAmtOut * 1e18 / srIn;
+            uint256 spotPrice;
+            {
+                IUniswapV3Pool pool = IUniswapV3Pool(uniswapPool);
+                (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+                if (address(prime) < srToken) {
+                    spotPrice = (uint256(1) << 192) * 1e18 / (uint256(sqrtPriceX96) * uint256(sqrtPriceX96));
+                } else {
+                    spotPrice = (uint256(sqrtPriceX96) * uint256(sqrtPriceX96) * 1e18) >> 192;
+                }
+            }
 
-        uint256 R = SENIOR_RATIO * 1e18 / JUNIOR_RATIO;
-        uint256 juniorPrice = (1e18 + R) - (seniorPrice * R / 1e18);
+            uint256 initialBorrow = srIn * spotPrice / (1e18 - SENIOR_RATIO * spotPrice / 1e18);
+            uint256 totalSr = srIn + initialBorrow * SENIOR_RATIO / 1e18;
 
-        uint256 jrOut = srIn * seniorPrice / juniorPrice;
+            IQuoterV2 quoter = IQuoterV2(UNISWAP_V3_QUOTER_V2_SEPOLIA);
+            (uint256 uaFromSwap,,,) = quoter.quoteExactInputSingle(
+                IQuoterV2.QuoteExactInputSingleParams({
+                    tokenIn: srToken,
+                    tokenOut: address(prime),
+                    amountIn: totalSr,
+                    fee: POOL_FEE,
+                    sqrtPriceLimitX96: 0
+                })
+            );
 
-        uint256 denominator = 1e18 - (SENIOR_RATIO * seniorPrice / 1e18);
-        uaToBorrow = srIn * seniorPrice / denominator;
+            effectivePrice = uaFromSwap * 1e18 / totalSr;
+        }
 
-        uaToBorrow = uaToBorrow * 99 / 100; 
-        // without buffer swapSeniorToJunior fails
+        uint256 numerator = srIn * effectivePrice / 1e18;
+        uint256 denominator = 1e18 - (SENIOR_RATIO * effectivePrice / 1e18);
+        uaToBorrow = numerator * 1e18 / denominator;
 
-        minJrOut = jrOut * userSlippageBps / 10000;
+        uint256 expectedJrOut = uaToBorrow * JUNIOR_RATIO / 1e18;
+        minJrOut = expectedJrOut * userSlippageBps / 10000;
     }
 
 
@@ -114,100 +136,132 @@ contract TrancheMarketRWATest is BaseForkTest {
         uint256 uaIn,
         uint256 userSlippageBps
     ) internal returns (uint256 uaToBorrow, uint256 minJrOut) {
-
-        // 1) initialPriceSenior = AMM.slot  UA/SR = 0.98
-        // 2) juniorPrice = P_jr = (1 + R) - (P_sr * R), where R = srWeight/jrWeight
-        // 3) Calculate amountToBorrow from uaIn and jrPrice using senior ratio
-        // 4) Calculate price impact:
-        //   4.1) using quoter to sell all seniorMinted tokens (uaAmountOut)
-        //   4.2) adjustedPrice = uaAmountOut / seniorAmountIn
-        //   4.3) slippage price impact % = (initialPriceSenior - adjustedPrice) / initialPriceSenior
-        // 5) if slippage price impact bigger than zero, apply slippage to juniorPrice
-        // 6) calculate totalUa from new juniorPrice,  uaToBorrow  = totalUa - uaIn
-        // 7) calculate minJrOut from uaIn juniorPrice and user slippage bps
+        // On-chain: totalUa = uaIn + uaToBorrow
+        //   srMinted = totalUa * seniorRatio
+        //   uaFromSwap = swap(srMinted) must >= uaToBorrow
         //
+        // Closed-form: uaToBorrow = uaIn * seniorRatio * P_eff / (1 - seniorRatio * P_eff)
+        // where P_eff = effective SR price after swap impact (from quoter)
+        //
+        //  P_eff  = effective SR price 
+        //  P_spot = spot SR price 
+        //
+        // Steps:
+        // 1) Get spot price, compute initial uaToBorrow estimate
+        // 2) Compute srMinted at that estimate, quote the swap → get effective price
+        // 3) Recompute uaToBorrow using the effective price (closed-form)
 
-        uint256 juniorPrice;
-        uint256 totalUaToTranche;
-        uint256 priceImpactPct;
+        uint256 effectivePrice;
+        {   
+            address srToken = market.srToken();
 
-        {
-            uint256 initialPriceSenior;
+            // initial spot price
+
+            uint256 spotPrice;
             {
-                address srToken = market.srToken();
                 IUniswapV3Pool pool = IUniswapV3Pool(uniswapPool);
-
-                // 1) initialPriceSenior from slot0
                 (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
                 if (address(prime) < srToken) {
-                    initialPriceSenior = (uint256(1) << 192) * 1e18 / (uint256(sqrtPriceX96) * uint256(sqrtPriceX96));
+                    spotPrice = (uint256(1) << 192) * 1e18 / (uint256(sqrtPriceX96) * uint256(sqrtPriceX96));
                 } else {
-                    initialPriceSenior = (uint256(sqrtPriceX96) * uint256(sqrtPriceX96) * 1e18) >> 192;
+                    spotPrice = (uint256(sqrtPriceX96) * uint256(sqrtPriceX96) * 1e18) >> 192;
                 }
             }
 
-            // 2) juniorPrice = (1 + R) - (P_sr * R)
-            uint256 R = SENIOR_RATIO * 1e18 / JUNIOR_RATIO;
-            juniorPrice = (1e18 + R) - (initialPriceSenior * R / 1e18);
+            uint256 initialBorrow = uaIn * SENIOR_RATIO * spotPrice / (1e18 * 1e18 - SENIOR_RATIO * spotPrice);
 
-            // 3) Calculate initial amountToBorrow from uaIn and jrPrice using senior ratio
-            uint256 denominator = 1e18 - (SENIOR_RATIO * initialPriceSenior / 1e18);
-            uint256 initialUaToBorrow = (uaIn * SENIOR_RATIO / 1e18) * initialPriceSenior / denominator;
+            // approximates how much SR will actually be swapped
+            uint256 srMinted = (uaIn + initialBorrow) * SENIOR_RATIO / 1e18;
 
-            // 4) Calculate price impact
-            // 4.1) seniorMinted from tranching (uaIn + initialUaToBorrow)
-            totalUaToTranche = uaIn + initialUaToBorrow;
-            uint256 seniorMinted = totalUaToTranche * SENIOR_RATIO / 1e18;
-
-            // 4.1) using quoter to sell all seniorMinted tokens
+            // this simulates the actual swap including fees and price impact
             IQuoterV2 quoter = IQuoterV2(UNISWAP_V3_QUOTER_V2_SEPOLIA);
-            IQuoterV2.QuoteExactInputSingleParams memory quoteParams = IQuoterV2.QuoteExactInputSingleParams({
-                tokenIn: market.srToken(),
-                tokenOut: address(prime),
-                amountIn: seniorMinted,
-                fee: POOL_FEE,
-                sqrtPriceLimitX96: 0
-            });
-            (uint256 uaAmountOut, , , ) = quoter.quoteExactInputSingle(quoteParams);
+            (uint256 uaFromSwap,,,) = quoter.quoteExactInputSingle(
+                IQuoterV2.QuoteExactInputSingleParams({
+                    tokenIn: srToken,
+                    tokenOut: address(prime),
+                    amountIn: srMinted,
+                    fee: POOL_FEE,
+                    sqrtPriceLimitX96: 0
+                })
+            );
 
-            // 4.2) adjustedPrice = uaAmountOut / seniorAmountIn
-            uint256 adjustedPrice = uaAmountOut * 1e18 / seniorMinted;
-
-            // 4.3) slippage price impact % = (initialPriceSenior - adjustedPrice) / initialPriceSenior
-            priceImpactPct = 0;
-            if (initialPriceSenior > adjustedPrice) {
-                priceImpactPct = (initialPriceSenior - adjustedPrice) * 1e18 / initialPriceSenior;
-            }
+            // P_eff
+            effectivePrice = uaFromSwap * 1e18 / srMinted;
         }
 
-        // 5) if slippage price impact > 0, apply slippage to juniorPrice
-        uint256 adjustedJuniorPrice = juniorPrice;
-        if (priceImpactPct > 0) {
-            adjustedJuniorPrice = juniorPrice + (juniorPrice * priceImpactPct / 1e18);
-        }
+        uint256 numerator = uaIn * SENIOR_RATIO / 1e18 * effectivePrice / 1e18;
+        uint256 denominator = 1e18 - (SENIOR_RATIO * effectivePrice / 1e18);
+        uaToBorrow = numerator * 1e18 / denominator;
 
-        // 6) calculate expectedJrOut and minJrOut from uaIn, juniorPrice and user slippage bps
-        uint256 expectedJrOut = uaIn * 1e18 / adjustedJuniorPrice;
+        uint256 expectedJrOut = (uaIn + uaToBorrow) * JUNIOR_RATIO / 1e18;
         minJrOut = expectedJrOut * userSlippageBps / 10000;
-
-        // 7) calculate totalUa from new juniorPrice, uaToBorrow = totalUa - uaIn
-
-        // uint256 totalUa = (totalUaToTranche * (1e18 - priceImpactPct)) / 1e18;
-        uint256 totalUa = totalUaToTranche * 99 / 100;
-
-        uaToBorrow = totalUa - uaIn;
     }
 
-    // Pool Liquidity = [-1000t, 1000t], 5 Million liquidity PRIME/srPRIME
+    function _calculateFromJrInput(
+        uint256 jrIn,
+        uint256 userSlippageBps
+    ) internal returns (uint256 uaToBorrow, uint256 minUaOut) {
+        // On-chain: srNeeded = jrIn * seniorRatio / juniorRatio
+        //   uaSpent = swap(UA → srNeeded) exactOutput
+        //   uaFromRecombine = recombine(srNeeded, jrIn) = jrIn / juniorRatio
+        //   uaToUser = uaFromRecombine - uaSpent
+        //
+        // No circularity: srNeeded is deterministic from jrIn
+        // Single quoter call gives exact uaSpent
+
+        address srToken = market.srToken();
+        uint256 target = (jrIn * SENIOR_RATIO) / 1e18;
+        uint256 srNeeded = (target * 1e18 + JUNIOR_RATIO - 1) / JUNIOR_RATIO;
+
+        IQuoterV2 quoter = IQuoterV2(UNISWAP_V3_QUOTER_V2_SEPOLIA);
+        (uint256 uaNeeded,,,) = quoter.quoteExactOutputSingle(
+            IQuoterV2.QuoteExactOutputSingleParams({
+                tokenIn: address(prime),
+                tokenOut: srToken,
+                amount: srNeeded,
+                fee: POOL_FEE,
+                sqrtPriceLimitX96: 0
+            })
+        );
+
+        uaToBorrow = uaNeeded;
+
+        uint256 uaFromRecombine = jrIn * 1e18 / JUNIOR_RATIO;
+        uint256 expectedUaOut = uaFromRecombine - uaNeeded;
+        minUaOut = expectedUaOut * userSlippageBps / 10000;
+    }
+
+    // Pool Liquidity = [-1000t, 1000t], 3 Million liquidity PRIME/srPRIME
     // Pool ratio: 0.98:1 (PRIME/srPRIME) after price adjustment
+    //
+    // +-----------+---------+---------+----------+
+    // | UA Input  | jrOut   | UA dust | minJrOut |
+    // +-----------+---------+---------+----------+
+    // |        10 |       9 |       0 |        9 |
+    // |        50 |      47 |       0 |       46 |
+    // |       500 |     475 |       0 |      465 |
+    // |     1_000 |     950 |       0 |      931 |
+    // |     4_000 |   3_800 |       0 |    3_724 |
+    // |    10_000 |   9_496 |       0 |    9_306 |
+    // |    20_000 |  18_974 |       0 |   18_595 |
+    // |    50_000 |  47_296 |       1 |   46_350 |
+    // |   100_000 |  94_131 |      10 |   92_248 |
+    // |   300_000 | 277_038 |     252 |  271_497 |
+    // |   450_000 | 409_808 |     802 |  401_612 |
+    // |   750_000 | 664_943 |   3_364 |  651_644 |
+    // | 1_000_000 | 867_865 |   7_402 |  850_507 |
+    // | 1_500_000 | 768_820 | 628_479 |  753_443 | -> 50% swap of all liquidity
+    // +-----------+---------+---------+----------+
     function test_BuyJunior_Success() public {
         address jrToken = market.jrToken();
         address uaToken = market.uaToken();
 
         address buyUser = makeAddr("buyJuniorUser");
-        uint256 buyAmount = 10_000e18; // uaIn
+        uint256 buyAmount = 100_000e18; // uaIn
+
         prime.mint(buyUser, buyAmount);
 
+        // ~0.9803
         _adjustPoolPriceBySellingSr(600_000e18);
 
         uint256 userSlippage = 9800; // 2%
@@ -237,6 +291,25 @@ contract TrancheMarketRWATest is BaseForkTest {
 
     // Pool Liquidity = [-1000t, 1000t], 3 Million liquidity PRIME/srPRIME
     // Pool ratio: ~0.98:1 (PRIME/srPRIME) after price adjustment
+    //
+    // +-----------+---------+---------+----------+
+    // | SR Input  | jrOut   | UA dust | minJrOut |
+    // +-----------+---------+---------+----------+
+    // |        10 |       9 |       0 |        9 |
+    // |        50 |      46 |       0 |       45 |
+    // |       500 |     465 |       0 |      456 |
+    // |     1_000 |     931 |       0 |      913 |
+    // |     4_000 |   3_724 |       0 |    3_650 |
+    // |    10_000 |   9_300 |       0 |    9_114 |
+    // |    20_000 |  18_566 |       0 |   18_194 |
+    // |    50_000 |  46_149 |       3 |   45_226 |
+    // |   100_000 |  91_427 |      26 |   89_599 |
+    // |   200_000 | 179_465 |     198 |  175_876 |
+    // |   271_000 | 240_017 |     472 |  235_216 |
+    // |   500_000 | 425_027 |   2_665 |  416_527 |
+    // |   750_000 | 582_901 |  42_477 |  571_243 |
+    // | 1_000_000 | 385_454 | 512_706 |  377_745 |
+    // +-----------+---------+---------+----------+
     function test_SwapSeniorToJunior_Success() public {
         address jrToken = market.jrToken();
         address srToken = market.srToken();
@@ -245,8 +318,8 @@ contract TrancheMarketRWATest is BaseForkTest {
 
         _adjustPoolPriceBySellingSr(600_000e18);
 
-        uint256 userSlippage = 9850;
-        (uint256 uaToBorrow, uint256 minJrOut) = _calculateUnderlyingToBorrow(swapAmount, userSlippage);
+        uint256 userSlippage = 9800;
+        (uint256 uaToBorrow, uint256 minJrOut) = _calculateFromSrInput(swapAmount, userSlippage);
 
         console.log("=== OFF-CHAIN CALCULATION ===");
         console.log("minJrOut (with 1.5% slippage):", minJrOut / 1e18);
@@ -272,7 +345,7 @@ contract TrancheMarketRWATest is BaseForkTest {
 
         assertEq(userSrBefore - userSrAfter, swapAmount);
         assertGt(userJrAfter - userJrBefore, 0);
-    }   
+    }
 
     function test_BuySenior_Success() public {
         address buyUser = makeAddr("buyUser");
@@ -314,5 +387,39 @@ contract TrancheMarketRWATest is BaseForkTest {
         assertEq(userSrBefore - userSrAfter, sellAmount);
         assertEq(userPrimeAfter - userPrimeBefore, uaOut);
         assertGt(uaOut, 0);
+    }
+
+    function test_SellJunior_Success() public {
+        address jrToken = market.jrToken();
+        address uaToken = market.uaToken();
+
+        uint256 sellAmount = 10_000e18;
+
+        _adjustPoolPriceBySellingSr(600_000e18);
+
+        uint256 userSlippage = 9800; // 2%
+        (uint256 uaToBorrow, uint256 minUaOut) = _calculateFromJrInput(sellAmount, userSlippage);
+
+        console.log("=== OFF-CHAIN CALCULATION ===");
+        console.log("minUaOut (with 2% slippage):", minUaOut / 1e18);
+        console.log("uaToBorrow:", uaToBorrow / 1e18);
+
+        uint256 userJrBefore = IERC20(jrToken).balanceOf(user1);
+        uint256 userUaBefore = IERC20(uaToken).balanceOf(user1);
+
+        vm.startPrank(user1);
+        IERC20(jrToken).approve(address(router), sellAmount);
+        router.sellJunior(address(market), sellAmount, uaToBorrow, minUaOut, block.timestamp + 1 minutes);
+        vm.stopPrank();
+
+        uint256 userJrAfter = IERC20(jrToken).balanceOf(user1);
+        uint256 userUaAfter = IERC20(uaToken).balanceOf(user1);
+
+        console.log("=== CHANGES ===");
+        console.log("jrPRIME sold:", (userJrBefore - userJrAfter) / 1e18);
+        console.log("UA received:", (userUaAfter - userUaBefore) / 1e18);
+
+        assertEq(userJrBefore - userJrAfter, sellAmount);
+        assertGt(userUaAfter - userUaBefore, 0);
     }
 }

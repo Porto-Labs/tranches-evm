@@ -8,6 +8,7 @@ import { IMorphoBase } from "@morpho-blue/interfaces/IMorpho.sol";
 import { IMorphoFlashLoanCallback } from "@morpho-blue/interfaces/IMorphoCallbacks.sol";
 import { ITrancheMarket } from "../interfaces/ITrancheMarket.sol";
 import { IRouter } from "../interfaces/IRouter.sol";
+import { FixedPointMathLib } from "solady/utils/FixedPointMathLib.sol";
 
 /**
  * @title Router
@@ -86,15 +87,15 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param deadline Transaction deadline timestamp
      * @return srOut Amount of senior tokens received
      */
-    function buySenior(
-        address market,
-        uint256 uaIn,
-        uint256 minSrOut,
-        uint256 deadline
-    ) external override checkDeadline(deadline) returns (uint256 srOut) {
+    function buySenior(address market, uint256 uaIn, uint256 minSrOut, uint256 deadline)
+        external
+        override
+        checkDeadline(deadline)
+        returns (uint256 srOut)
+    {
         if (uaIn == 0) revert ZeroAmount();
 
-        (address uaAddress, address srAddress, , uint24 poolFee) = ITrancheMarket(market).getSwapParameters();
+        (address uaAddress, address srAddress,, uint24 poolFee) = ITrancheMarket(market).getSwapParameters();
 
         IERC20(uaAddress).safeTransferFrom(msg.sender, address(this), uaIn);
 
@@ -124,14 +125,14 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param deadline Transaction deadline timestamp
      * @return uaOut Amount of UA received
      */
-    function sellSenior(
-        address market,
-        uint256 srIn,
-        uint256 minUaOut,
-        uint256 deadline
-    ) external override checkDeadline(deadline) returns (uint256 uaOut) {
+    function sellSenior(address market, uint256 srIn, uint256 minUaOut, uint256 deadline)
+        external
+        override
+        checkDeadline(deadline)
+        returns (uint256 uaOut)
+    {
         if (srIn == 0) revert ZeroAmount();
-        (address uaAddress, address srAddress, , uint24 poolFee) = ITrancheMarket(market).getSwapParameters();
+        (address uaAddress, address srAddress,, uint24 poolFee) = ITrancheMarket(market).getSwapParameters();
 
         IERC20(srAddress).safeTransferFrom(msg.sender, address(this), srIn);
 
@@ -165,13 +166,12 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
      */
-    function buyJunior(
-        address market,
-        uint256 uaIn,
-        uint256 uaToBorrow,
-        uint256 minJrOut,
-        uint256 deadline
-    ) external override checkDeadline(deadline) initiateFlashLoan {
+    function buyJunior(address market, uint256 uaIn, uint256 uaToBorrow, uint256 minJrOut, uint256 deadline)
+        external
+        override
+        checkDeadline(deadline)
+        initiateFlashLoan
+    {
         if (uaIn == 0) revert ZeroAmount();
         address uaAddress = ITrancheMarket(market).uaToken();
 
@@ -197,16 +197,15 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param minUaOut Minimum amount of UA to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
      */
-    function sellJunior(
-        address market,
-        uint256 jrIn,
-        uint256 uaToBorrow,
-        uint256 minUaOut,
-        uint256 deadline
-    ) external override checkDeadline(deadline) initiateFlashLoan {
+    function sellJunior(address market, uint256 jrIn, uint256 uaToBorrow, uint256 minUaOut, uint256 deadline)
+        external
+        override
+        checkDeadline(deadline)
+        initiateFlashLoan
+    {
         if (jrIn == 0) revert ZeroAmount();
 
-        (address uaAddress, , address jrAddress, ) = ITrancheMarket(market).getSwapParameters();
+        (address uaAddress,, address jrAddress,) = ITrancheMarket(market).getSwapParameters();
 
         IERC20(jrAddress).safeTransferFrom(msg.sender, address(this), jrIn);
 
@@ -231,15 +230,14 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param minSrOut Minimum amount of senior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
      */
-    function swapJuniorToSenior(
-        address market,
-        uint256 jrIn,
-        uint256 uaToBorrow,
-        uint256 minSrOut,
-        uint256 deadline
-    ) external override checkDeadline(deadline) initiateFlashLoan {
+    function swapJuniorToSenior(address market, uint256 jrIn, uint256 uaToBorrow, uint256 minSrOut, uint256 deadline)
+        external
+        override
+        checkDeadline(deadline)
+        initiateFlashLoan
+    {
         if (jrIn == 0) revert ZeroAmount();
-        (address uaAddress, , address jrAddress,) = ITrancheMarket(market).getSwapParameters();
+        (address uaAddress,, address jrAddress,) = ITrancheMarket(market).getSwapParameters();
 
         IERC20(jrAddress).safeTransferFrom(msg.sender, address(this), jrIn);
 
@@ -262,15 +260,14 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
      */
-    function swapSeniorToJunior(
-        address market,
-        uint256 srIn,
-        uint256 uaToBorrow,
-        uint256 minJrOut,
-        uint256 deadline
-    ) external override checkDeadline(deadline) initiateFlashLoan {
+    function swapSeniorToJunior(address market, uint256 srIn, uint256 uaToBorrow, uint256 minJrOut, uint256 deadline)
+        external
+        override
+        checkDeadline(deadline)
+        initiateFlashLoan
+    {
         if (srIn == 0) revert ZeroAmount();
-        (address uaAddress, address srAddress, , ) = ITrancheMarket(market).getSwapParameters();
+        (address uaAddress, address srAddress,,) = ITrancheMarket(market).getSwapParameters();
 
         IERC20(srAddress).safeTransferFrom(msg.sender, address(this), srIn);
 
@@ -285,24 +282,19 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param assets Amount of ua borrowed
      * @param data Encoded callback data
      */
-    function onMorphoFlashLoan(uint256 assets, bytes calldata data) external onlyMorpho override {
+    function onMorphoFlashLoan(uint256 assets, bytes calldata data) external override onlyMorpho {
         if (!_flashLoanInitiated) revert RouterUnauthorizedCallback();
         _flashLoanInitiated = false;
 
-        (address market, address user, uint256 amount, uint256 minOut, SwapOperation operation) = abi.decode(
-            data,
-            (address, address, uint256, uint256, SwapOperation)
-        );
+        (address market, address user, uint256 amount, uint256 minOut, SwapOperation operation) =
+            abi.decode(data, (address, address, uint256, uint256, SwapOperation));
 
         if (operation == SwapOperation.SELL_JUNIOR) {
             _handleSellJunior(market, user, amount, minOut, assets);
-
         } else if (operation == SwapOperation.BUY_JUNIOR) {
             _handleBuyJunior(market, user, amount, minOut, assets);
-
         } else if (operation == SwapOperation.SWAP_JUNIOR_TO_SENIOR) {
             _handleSwapJuniorToSenior(market, user, amount, minOut, assets);
-
         } else if (operation == SwapOperation.SWAP_SENIOR_TO_JUNIOR) {
             _handleSwapSeniorToJunior(market, user, amount, minOut, assets);
         }
@@ -317,14 +309,11 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param uaBorrowed UA borrowed from flash loan
      * @dev Called from onMorphoFlashLoan for SELL_JUNIOR operation
      */
-    function _handleSellJunior(
-        address market,
-        address user,
-        uint256 jrIn,
-        uint256 minUaOut,
-        uint256 uaBorrowed
-    ) internal {
-        (address uaAddress, address srAddress, address jrAddress, uint24 poolFee) = ITrancheMarket(market).getSwapParameters();
+    function _handleSellJunior(address market, address user, uint256 jrIn, uint256 minUaOut, uint256 uaBorrowed)
+        internal
+    {
+        (address uaAddress, address srAddress, address jrAddress, uint24 poolFee) =
+            ITrancheMarket(market).getSwapParameters();
 
         uint256 srNeeded = calculateSeniorNeeded(jrIn, market);
 
@@ -368,14 +357,11 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param uaBorrowed UA borrowed from flash loan
      * @dev Called from onMorphoFlashLoan for BUY_JUNIOR operation
      */
-    function _handleBuyJunior(
-        address market,
-        address user,
-        uint256 uaIn,
-        uint256 minJrOut,
-        uint256 uaBorrowed
-    ) internal {
-       (address uaAddress, address srAddress, address jrAddress, uint24 poolFee) = ITrancheMarket(market).getSwapParameters();
+    function _handleBuyJunior(address market, address user, uint256 uaIn, uint256 minJrOut, uint256 uaBorrowed)
+        internal
+    {
+        (address uaAddress, address srAddress, address jrAddress, uint24 poolFee) =
+            ITrancheMarket(market).getSwapParameters();
 
         uint256 totalUa = uaIn + uaBorrowed;
 
@@ -417,14 +403,11 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param uaBorrowed UA borrowed from flash loan
      * @dev Called from onMorphoFlashLoan for SWAP_JUNIOR_TO_SENIOR operation
      */
-    function _handleSwapJuniorToSenior(
-        address market,
-        address user,
-        uint256 jrIn,
-        uint256 minSrOut,
-        uint256 uaBorrowed
-    ) internal {
-        (address uaAddress, address srAddress, address jrAddress, uint24 poolFee) = ITrancheMarket(market).getSwapParameters();
+    function _handleSwapJuniorToSenior(address market, address user, uint256 jrIn, uint256 minSrOut, uint256 uaBorrowed)
+        internal
+    {
+        (address uaAddress, address srAddress, address jrAddress, uint24 poolFee) =
+            ITrancheMarket(market).getSwapParameters();
 
         uint256 remainingUa;
         {
@@ -479,14 +462,11 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param uaBorrowed UA borrowed from flash loan
      * @dev Called from onMorphoFlashLoan for SWAP_SENIOR_TO_JUNIOR operation
      */
-    function _handleSwapSeniorToJunior(
-        address market,
-        address user,
-        uint256 srIn,
-        uint256 minJrOut,
-        uint256 uaBorrowed
-    ) internal {
-        (address uaAddress, address srAddress, address jrAddress, uint24 poolFee) = ITrancheMarket(market).getSwapParameters();
+    function _handleSwapSeniorToJunior(address market, address user, uint256 srIn, uint256 minJrOut, uint256 uaBorrowed)
+        internal
+    {
+        (address uaAddress, address srAddress, address jrAddress, uint24 poolFee) =
+            ITrancheMarket(market).getSwapParameters();
 
         IERC20(uaAddress).forceApprove(market, uaBorrowed);
         (uint256 srMinted, uint256 jrMinted) = ITrancheMarket(market).tranche(uaBorrowed, address(this));
@@ -523,6 +503,6 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
     function calculateSeniorNeeded(uint256 jrAmount, address market) public view override returns (uint256 srNeeded) {
         uint256 seniorRatio = ITrancheMarket(market).seniorRatio();
         uint256 juniorRatio = ITrancheMarket(market).juniorRatio();
-        srNeeded = (jrAmount * seniorRatio) / juniorRatio;
+        srNeeded = FixedPointMathLib.fullMulDivUp(jrAmount, seniorRatio, juniorRatio);
     }
 }

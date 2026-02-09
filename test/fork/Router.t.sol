@@ -40,7 +40,7 @@ contract TrancheMarketRWATest is BaseForkTest {
     function _setupUsers() internal {
         uint256 user1Deposit = 100_000e18;
         uint256 user2Deposit = 50_000e18;
-        uint256 user3Deposit = 3_75_000e18;
+        uint256 user3Deposit = 375_000e18;
 
         prime.mint(user1, user1Deposit);
         vm.startPrank(user1);
@@ -76,10 +76,10 @@ contract TrancheMarketRWATest is BaseForkTest {
         vm.stopPrank();
     }
 
-    function _calculateFromSrInput(
-        uint256 srIn,
-        uint256 userSlippageBps
-    ) internal returns (uint256 uaToBorrow, uint256 minJrOut) {
+    function _calculateFromSrInput(uint256 srIn, uint256 userSlippageBps)
+        internal
+        returns (uint256 uaToBorrow, uint256 minJrOut)
+    {
         // On-chain: totalSr = srIn + uaBorrowed * seniorRatio
         //   uaReceived = swap(totalSr) must >= uaBorrowed
         //
@@ -98,7 +98,7 @@ contract TrancheMarketRWATest is BaseForkTest {
             uint256 spotPrice;
             {
                 IUniswapV3Pool pool = IUniswapV3Pool(uniswapPool);
-                (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+                (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
                 if (address(prime) < srToken) {
                     spotPrice = (uint256(1) << 192) * 1e18 / (uint256(sqrtPriceX96) * uint256(sqrtPriceX96));
                 } else {
@@ -112,11 +112,7 @@ contract TrancheMarketRWATest is BaseForkTest {
             IQuoterV2 quoter = IQuoterV2(UNISWAP_V3_QUOTER_V2_SEPOLIA);
             (uint256 uaFromSwap,,,) = quoter.quoteExactInputSingle(
                 IQuoterV2.QuoteExactInputSingleParams({
-                    tokenIn: srToken,
-                    tokenOut: address(prime),
-                    amountIn: totalSr,
-                    fee: POOL_FEE,
-                    sqrtPriceLimitX96: 0
+                    tokenIn: srToken, tokenOut: address(prime), amountIn: totalSr, fee: POOL_FEE, sqrtPriceLimitX96: 0
                 })
             );
 
@@ -128,14 +124,13 @@ contract TrancheMarketRWATest is BaseForkTest {
         uaToBorrow = numerator * 1e18 / denominator;
 
         uint256 expectedJrOut = uaToBorrow * JUNIOR_RATIO / 1e18;
-        minJrOut = expectedJrOut * userSlippageBps / 10000;
+        minJrOut = expectedJrOut * userSlippageBps / 10_000;
     }
 
-
-    function _calculateFromUaInput(
-        uint256 uaIn,
-        uint256 userSlippageBps
-    ) internal returns (uint256 uaToBorrow, uint256 minJrOut) {
+    function _calculateFromUaInput(uint256 uaIn, uint256 userSlippageBps)
+        internal
+        returns (uint256 uaToBorrow, uint256 minJrOut)
+    {
         // On-chain: totalUa = uaIn + uaToBorrow
         //   srMinted = totalUa * seniorRatio
         //   uaFromSwap = swap(srMinted) must >= uaToBorrow
@@ -143,8 +138,8 @@ contract TrancheMarketRWATest is BaseForkTest {
         // Closed-form: uaToBorrow = uaIn * seniorRatio * P_eff / (1 - seniorRatio * P_eff)
         // where P_eff = effective SR price after swap impact (from quoter)
         //
-        //  P_eff  = effective SR price 
-        //  P_spot = spot SR price 
+        //  P_eff  = effective SR price
+        //  P_spot = spot SR price
         //
         // Steps:
         // 1) Get spot price, compute initial uaToBorrow estimate
@@ -152,7 +147,7 @@ contract TrancheMarketRWATest is BaseForkTest {
         // 3) Recompute uaToBorrow using the effective price (closed-form)
 
         uint256 effectivePrice;
-        {   
+        {
             address srToken = market.srToken();
 
             // initial spot price
@@ -160,7 +155,7 @@ contract TrancheMarketRWATest is BaseForkTest {
             uint256 spotPrice;
             {
                 IUniswapV3Pool pool = IUniswapV3Pool(uniswapPool);
-                (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+                (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
                 if (address(prime) < srToken) {
                     spotPrice = (uint256(1) << 192) * 1e18 / (uint256(sqrtPriceX96) * uint256(sqrtPriceX96));
                 } else {
@@ -177,11 +172,7 @@ contract TrancheMarketRWATest is BaseForkTest {
             IQuoterV2 quoter = IQuoterV2(UNISWAP_V3_QUOTER_V2_SEPOLIA);
             (uint256 uaFromSwap,,,) = quoter.quoteExactInputSingle(
                 IQuoterV2.QuoteExactInputSingleParams({
-                    tokenIn: srToken,
-                    tokenOut: address(prime),
-                    amountIn: srMinted,
-                    fee: POOL_FEE,
-                    sqrtPriceLimitX96: 0
+                    tokenIn: srToken, tokenOut: address(prime), amountIn: srMinted, fee: POOL_FEE, sqrtPriceLimitX96: 0
                 })
             );
 
@@ -194,13 +185,13 @@ contract TrancheMarketRWATest is BaseForkTest {
         uaToBorrow = numerator * 1e18 / denominator;
 
         uint256 expectedJrOut = (uaIn + uaToBorrow) * JUNIOR_RATIO / 1e18;
-        minJrOut = expectedJrOut * userSlippageBps / 10000;
+        minJrOut = expectedJrOut * userSlippageBps / 10_000;
     }
 
-    function _calculateFromJrInput(
-        uint256 jrIn,
-        uint256 userSlippageBps
-    ) internal returns (uint256 uaToBorrow, uint256 minUaOut) {
+    function _calculateFromJrInput(uint256 jrIn, uint256 userSlippageBps)
+        internal
+        returns (uint256 uaToBorrow, uint256 minUaOut)
+    {
         // On-chain: srNeeded = jrIn * seniorRatio / juniorRatio
         //   uaSpent = swap(UA → srNeeded) exactOutput
         //   uaFromRecombine = recombine(srNeeded, jrIn) = jrIn / juniorRatio
@@ -210,17 +201,30 @@ contract TrancheMarketRWATest is BaseForkTest {
         // Single quoter call gives exact uaSpent
 
         address srToken = market.srToken();
-        uint256 target = (jrIn * SENIOR_RATIO) / 1e18;
-        uint256 srNeeded = (target * 1e18 + JUNIOR_RATIO - 1) / JUNIOR_RATIO;
+
+        uint256 srNeededOffChain = (jrIn * SENIOR_RATIO + JUNIOR_RATIO - 1) / JUNIOR_RATIO;
+        uint256 srNeededRouter = router.calculateSeniorNeeded(jrIn, address(market));
+
+        console.log("=== SR NEEDED CALCULATION ===");
+        console.log("jrIn:", jrIn);
+        console.log("SENIOR_RATIO:", SENIOR_RATIO);
+        console.log("JUNIOR_RATIO:", JUNIOR_RATIO);
+        console.log("srNeeded (off-chain):", srNeededOffChain);
+        console.log("srNeeded (router):", srNeededRouter);
+
+        console.log("");
+        console.log("=== RECOMBINE RATIO CHECK PREVIEW ===");
+        uint256 lhs = (srNeededRouter * JUNIOR_RATIO) / 1e18;
+        uint256 rhs = (jrIn * SENIOR_RATIO) / 1e18;
+        console.log("srIn * juniorRatio / 1e18:", lhs);
+        console.log("jrIn * seniorRatio / 1e18:", rhs);
+        console.log("Difference (should be 0):", rhs > lhs ? rhs - lhs : lhs - rhs);
+        console.log("Will recombine pass?:", lhs == rhs ? "YES" : "NO");
 
         IQuoterV2 quoter = IQuoterV2(UNISWAP_V3_QUOTER_V2_SEPOLIA);
         (uint256 uaNeeded,,,) = quoter.quoteExactOutputSingle(
             IQuoterV2.QuoteExactOutputSingleParams({
-                tokenIn: address(prime),
-                tokenOut: srToken,
-                amount: srNeeded,
-                fee: POOL_FEE,
-                sqrtPriceLimitX96: 0
+                tokenIn: address(prime), tokenOut: srToken, amount: srNeededRouter, fee: POOL_FEE, sqrtPriceLimitX96: 0
             })
         );
 
@@ -228,7 +232,7 @@ contract TrancheMarketRWATest is BaseForkTest {
 
         uint256 uaFromRecombine = jrIn * 1e18 / JUNIOR_RATIO;
         uint256 expectedUaOut = uaFromRecombine - uaNeeded;
-        minUaOut = expectedUaOut * userSlippageBps / 10000;
+        minUaOut = expectedUaOut * userSlippageBps / 10_000;
     }
 
     // Pool Liquidity = [-1000t, 1000t], 3 Million liquidity PRIME/srPRIME
@@ -314,7 +318,7 @@ contract TrancheMarketRWATest is BaseForkTest {
         address jrToken = market.jrToken();
         address srToken = market.srToken();
         address uaToken = market.uaToken();
-        uint256 swapAmount = 1_000e18;
+        uint256 swapAmount = 1000e18;
 
         _adjustPoolPriceBySellingSr(600_000e18);
 

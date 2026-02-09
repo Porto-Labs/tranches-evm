@@ -17,11 +17,23 @@
       "rev": "1801b0541f4fda118a10798fd3486bb7051c5dd6"
     }
   },
+  "lib/morpho-blue": {
+    "rev": "55d2d99304fb3fb930c688462ae2ccabb1d533ad"
+  },
   "lib/openzeppelin-contracts": {
     "tag": {
       "name": "v4.9.3",
       "rev": "fd81a96f01cc42ef1c9a5399364968d0e07e9e90"
     }
+  },
+  "lib/solady": {
+    "tag": {
+      "name": "v0.1.26",
+      "rev": "acd959aa4bd04720d640bf4e6a5c71037510cc4b"
+    }
+  },
+  "lib/swap-router-contracts": {
+    "rev": "c696aada49b33c8e764e6f0bd0a0a56bd8aa455f"
   },
   "lib/v3-core": {
     "tag": {

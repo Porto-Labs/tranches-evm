@@ -8,7 +8,7 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 import { AggregatorV3Interface } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import { ITrancheMarket } from "../interfaces/ITrancheMarket.sol";
 import { TrancheToken } from "./TrancheToken.sol";
-import { PortoMath } from "../libraries/math/PortoMath.sol";
+import { FixedPointMathLib } from "solady/utils/FixedPointMathLib.sol";
 import { SettlementRatioModel } from "../settlement/SettlementRatioModel.sol";
 
 /**
@@ -21,7 +21,7 @@ import { SettlementRatioModel } from "../settlement/SettlementRatioModel.sol";
  */
 contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     using SafeERC20 for IERC20;
-    using PortoMath for uint256;
+    using FixedPointMathLib for uint256;
 
     // ============ Structs ============
 
@@ -167,9 +167,9 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
 
         if (params.liquidationEnabled) {
             uint256 _juniorRatio = ONE - params.seniorRatio;
-            liquidationPrice = fetchedPrice.mulDown(
-                params.seniorRatio.mulDown(ONE + params.seniorFloor) +
-                    _juniorRatio.mulDown(params.liquidationBuffer + params.liquidationReward)
+            liquidationPrice = fetchedPrice.mulWad(
+                params.seniorRatio.mulWad(ONE + params.seniorFloor)
+                    + _juniorRatio.mulWad(params.liquidationBuffer + params.liquidationReward)
             );
         }
 
@@ -198,18 +198,20 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @return srOut Amount of senior tokens minted
      * @return jrOut Amount of junior tokens minted
      */
-    function tranche(
-        uint256 uaIn,
-        address receiver
-    ) external override nonReentrant returns (uint256 srOut, uint256 jrOut) {
+    function tranche(uint256 uaIn, address receiver)
+        external
+        override
+        nonReentrant
+        returns (uint256 srOut, uint256 jrOut)
+    {
         if (block.timestamp >= expiry) revert TrancheMarketExpired();
         if (uaIn == 0) revert TrancheZeroAmount();
         if (receiver == address(0)) revert ZeroAddress();
 
         _uaToken.safeTransferFrom(msg.sender, address(this), uaIn);
 
-        srOut = uaIn.mulDown(seniorRatio);
-        jrOut = uaIn.mulDown(juniorRatio);
+        srOut = uaIn.mulWad(seniorRatio);
+        jrOut = uaIn.mulWad(juniorRatio);
 
         _srTokenContract.mint(receiver, srOut);
         _jrTokenContract.mint(receiver, jrOut);
@@ -224,23 +226,24 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @param receiver Address to receive UA
      * @return uaOut Amount of UA returned
      */
-    function recombine(
-        uint256 srIn,
-        uint256 jrIn,
-        address receiver
-    ) external override nonReentrant returns (uint256 uaOut) {
+    function recombine(uint256 srIn, uint256 jrIn, address receiver)
+        external
+        override
+        nonReentrant
+        returns (uint256 uaOut)
+    {
         if (block.timestamp >= expiry) revert TrancheMarketExpired();
         if (srIn == 0 || jrIn == 0) revert TrancheZeroAmount();
         if (receiver == address(0)) revert ZeroAddress();
 
         // Validate ratio: srIn / seniorRatio == jrIn / juniorRatio
         // Equivalent equation without precision loss: srIn * juniorRatio == jrIn * seniorRatio
-        if (srIn.mulDown(juniorRatio) != jrIn.mulDown(seniorRatio)) revert TrancheRatioMismatch();
+        if (srIn.mulWad(juniorRatio) != jrIn.mulWad(seniorRatio)) revert TrancheRatioMismatch();
 
         _srTokenContract.burn(msg.sender, srIn);
         _jrTokenContract.burn(msg.sender, jrIn);
 
-        uaOut = srIn.divDown(seniorRatio);
+        uaOut = srIn.divWad(seniorRatio);
 
         _uaToken.safeTransfer(receiver, uaOut);
 
@@ -265,9 +268,9 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         uint256 oraclePrice = _getOraclePrice();
         uint256 deviation;
         if (oraclePrice >= referencePrice) {
-            deviation = (oraclePrice - referencePrice).divDown(referencePrice);
+            deviation = (oraclePrice - referencePrice).divWad(referencePrice);
         } else {
-            deviation = (referencePrice - oraclePrice).divDown(referencePrice);
+            deviation = (referencePrice - oraclePrice).divWad(referencePrice);
         }
         if (deviation > deviationThreshold) revert OraclePriceDeviationExceeded();
 
@@ -303,8 +306,8 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         if (srIn == 0) revert TrancheZeroAmount();
         if (receiver == address(0)) revert ZeroAddress();
 
-        _srTokenContract.burn(msg.sender, srIn);   
-        uaOut = srIn.mulDown(srRateUA);
+        _srTokenContract.burn(msg.sender, srIn);
+        uaOut = srIn.mulWad(srRateUA);
         _uaToken.safeTransfer(receiver, uaOut);
 
         emit RedeemSenior(msg.sender, receiver, srIn, uaOut);
@@ -322,7 +325,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         if (receiver == address(0)) revert ZeroAddress();
 
         _jrTokenContract.burn(msg.sender, jrIn);
-        uaOut = jrIn.mulDown(jrRateUA);
+        uaOut = jrIn.mulWad(jrRateUA);
 
         if (uaOut > 0) {
             _uaToken.safeTransfer(receiver, uaOut);
@@ -364,10 +367,10 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         uint256 srSupply = _srTokenContract.totalSupply();
         uint256 jrSupply = _jrTokenContract.totalSupply();
 
-        _liquidatorReward = jrSupply.mulDown(liquidationReward);
+        _liquidatorReward = jrSupply.mulWad(liquidationReward);
 
         uint256 remainingUA = uaQuantity - _liquidatorReward;
-        srRateUA = remainingUA.divDown(srSupply);
+        srRateUA = remainingUA.divWad(srSupply);
         jrRateUA = 0;
         finalized = true;
 
@@ -448,9 +451,9 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
             uint256 srSupply = _srTokenContract.totalSupply();
             uint256 jrSupply = _jrTokenContract.totalSupply();
 
-            _liquidatorReward = jrSupply.mulDown(liquidationReward);
+            _liquidatorReward = jrSupply.mulWad(liquidationReward);
             uint256 remainingUA = uaQuantity - _liquidatorReward;
-            _srRateUA = remainingUA.divDown(srSupply);
+            _srRateUA = remainingUA.divWad(srSupply);
         }
     }
 
@@ -482,7 +485,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @return price Oracle price scaled to 1e18 precision
      */
     function _getOraclePrice() internal view returns (uint256 price) {
-        (, int256 answer, , uint256 updatedAt, ) = _priceFeed.latestRoundData();
+        (, int256 answer,, uint256 updatedAt,) = _priceFeed.latestRoundData();
 
         // Validate price is positive
         if (answer <= 0) revert OracleInvalidPrice();
@@ -537,7 +540,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @return jrOut Amount of junior tokens that would be minted
      */
     function previewTranche(uint256 uaIn) external view override returns (uint256 srOut, uint256 jrOut) {
-        srOut = uaIn.mulDown(seniorRatio);
-        jrOut = uaIn.mulDown(juniorRatio);
+        srOut = uaIn.mulWad(seniorRatio);
+        jrOut = uaIn.mulWad(juniorRatio);
     }
 }

@@ -24,7 +24,7 @@ contract TrancheMarketRedeemTest is Test {
 
         ua = new ERC20Mock("Underlying Asset", "UA");
         oracle = new MockChainlinkAggregator(8, "UA / USD");
-        oracle.setRoundData(100000000, block.timestamp);
+        oracle.setRoundData(100_000_000, block.timestamp);
 
         TrancheMarket.MarketParams memory params = _defaultMarketParams();
         market = new TrancheMarket(params);
@@ -37,7 +37,7 @@ contract TrancheMarketRedeemTest is Test {
         market.tranche(100e18, user);
 
         vm.warp(block.timestamp + MONTH + 1);
-        oracle.setRoundData(100000000, block.timestamp);
+        oracle.setRoundData(100_000_000, block.timestamp);
 
         vm.prank(admin);
         market.finalize(1e18, 0.01e18);

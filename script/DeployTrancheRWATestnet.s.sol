@@ -7,6 +7,7 @@ import { TrancheMarket } from "src/core/TrancheMarket.sol";
 import { Router } from "src/core/Router.sol";
 import { ERC20Mock } from "test/mocks/ERC20Mock.sol";
 import { MockChainlinkAggregator } from "test/mocks/MockChainlinkAggregator.sol";
+
 interface IPositionManager {
     struct MintParams {
         address token0;
@@ -22,16 +23,15 @@ interface IPositionManager {
         uint256 deadline;
     }
 
-    function createAndInitializePoolIfNecessary(
-        address token0,
-        address token1,
-        uint24 fee,
-        uint160 sqrtPriceX96
-    ) external payable returns (address pool);
+    function createAndInitializePoolIfNecessary(address token0, address token1, uint24 fee, uint160 sqrtPriceX96)
+        external
+        payable
+        returns (address pool);
 
-    function mint(
-        MintParams calldata params
-    ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+    function mint(MintParams calldata params)
+        external
+        payable
+        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
 }
 
 contract DeployTrancheRWATestnet is Script {
@@ -39,7 +39,7 @@ contract DeployTrancheRWATestnet is Script {
     uint256 constant MATURITY = 1 hours; // for test purpose
 
     uint256 constant SENIOR_RATIO = 0.725e18; // 72.5% Senior & 27.5% Junior
-    uint256 constant SENIOR_FLOOR = 0.04e18;  // 4% Minimum Floor
+    uint256 constant SENIOR_FLOOR = 0.04e18; // 4% Minimum Floor
     uint256 constant SENIOR_TARGET = 0.06e18; // 6% Target Yield
 
     uint256 constant INITIAL_PRICE = 1.02e18;
@@ -78,7 +78,7 @@ contract DeployTrancheRWATestnet is Script {
         _liquidityProviderTranche();
         _createUniswapPool();
         _addLiquidity();
-        
+
         vm.stopBroadcast();
 
         _logDeployedAddresses();
@@ -114,7 +114,7 @@ contract DeployTrancheRWATestnet is Script {
             seniorTarget: SENIOR_TARGET,
             liquidationEnabled: true,
             liquidationBuffer: 0.025e18, // 2.5%
-            liquidationReward: 0.025e18  // 2.5%
+            liquidationReward: 0.025e18 // 2.5%
         });
 
         market = new TrancheMarket(params);
@@ -151,9 +151,7 @@ contract DeployTrancheRWATestnet is Script {
     function _createUniswapPool() internal {
         console.log("\n=== Creating Uniswap V3 Pool ===");
 
-        IPositionManager positionManager = IPositionManager(
-            UNISWAP_V3_POSITION_MANAGER_SEPOLIA
-        );
+        IPositionManager positionManager = IPositionManager(UNISWAP_V3_POSITION_MANAGER_SEPOLIA);
 
         address token0;
         address token1;
@@ -176,14 +174,9 @@ contract DeployTrancheRWATestnet is Script {
         // 2.0                    |  112045541949572279837463876454
         //
         // Since our pool is PRIME/srPRIME at 1:1 ratio, we use 2^96.
-        uint160 sqrtPriceX96 = 79228162514264337593543950336;
+        uint160 sqrtPriceX96 = 79_228_162_514_264_337_593_543_950_336;
 
-        uniswapPool = positionManager.createAndInitializePoolIfNecessary(
-            token0,
-            token1,
-            POOL_FEE,
-            sqrtPriceX96
-        );
+        uniswapPool = positionManager.createAndInitializePoolIfNecessary(token0, token1, POOL_FEE, sqrtPriceX96);
 
         console.log("Uniswap V3 Pool created at:", uniswapPool);
         console.log("Token0:", token0);
@@ -194,9 +187,7 @@ contract DeployTrancheRWATestnet is Script {
     function _addLiquidity() internal {
         console.log("\n=== Adding Liquidity to Pool ===");
 
-        IPositionManager positionManager = IPositionManager(
-            UNISWAP_V3_POSITION_MANAGER_SEPOLIA
-        );
+        IPositionManager positionManager = IPositionManager(UNISWAP_V3_POSITION_MANAGER_SEPOLIA);
 
         address srToken = market.srToken();
 
@@ -220,10 +211,10 @@ contract DeployTrancheRWATestnet is Script {
             amount1Desired = LP_PRIME_AMOUNT;
         }
 
-        // liquidity is provided across the entire price curve 
+        // liquidity is provided across the entire price curve
         // TODO: adjust ticks for narrower range if needed
-        int24 tickLower = -887220;
-        int24 tickUpper = 887220;
+        int24 tickLower = -887_220;
+        int24 tickUpper = 887_220;
 
         IPositionManager.MintParams memory params = IPositionManager.MintParams({
             token0: token0,
@@ -253,10 +244,7 @@ contract DeployTrancheRWATestnet is Script {
     function _deployRouter() internal {
         console.log("\n=== Deploying Router ===");
 
-        router = new Router(
-            UNISWAP_V3_SWAP_ROUTER_SEPOLIA,
-            MORPHO_SEPOLIA
-        );
+        router = new Router(UNISWAP_V3_SWAP_ROUTER_SEPOLIA, MORPHO_SEPOLIA);
 
         console.log("Router deployed at:", address(router));
     }
@@ -285,7 +273,7 @@ contract DeployTrancheRWATestnet is Script {
         console.log("oracle.setRoundData(price8Decimals, block.timestamp)");
         console.log("Example prices:");
         console.log("  0.97 USD = 97000000"); // All-Time Low: Dec 07, 2025
-        console.log("  1.02 USD = 102000000"); 
+        console.log("  1.02 USD = 102000000");
         console.log("  1.10 USD = 110000000");
         console.log("\n");
     }

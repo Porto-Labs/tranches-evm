@@ -3,7 +3,6 @@ out/
 cache_forge/
 build/
 broadcast/
-lib/
 
 # Environment variables
 .env

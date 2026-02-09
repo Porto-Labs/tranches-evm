@@ -85,7 +85,9 @@ interface IRouter {
      * @param deadline Transaction deadline timestamp
      * @return srOut Amount of senior tokens received
      */
-    function buySenior(address market, uint256 uaIn, uint256 minSrOut, uint256 deadline) external returns (uint256 srOut);
+    function buySenior(address market, uint256 uaIn, uint256 minSrOut, uint256 deadline)
+        external
+        returns (uint256 srOut);
 
     /**
      * @notice Sell senior tranche tokens for UA
@@ -96,7 +98,9 @@ interface IRouter {
      * @param deadline Transaction deadline timestamp
      * @return uaOut Amount of UA received
      */
-    function sellSenior(address market, uint256 srIn, uint256 minUaOut, uint256 deadline) external returns (uint256 uaOut);
+    function sellSenior(address market, uint256 srIn, uint256 minUaOut, uint256 deadline)
+        external
+        returns (uint256 uaOut);
 
     /**
      * @notice Buy junior tranche tokens by depositing UA
@@ -147,7 +151,8 @@ interface IRouter {
      * @param minSrOut Minimum amount of senior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
      */
-    function swapJuniorToSenior(address market, uint256 jrIn, uint256 uaToBorrow, uint256 minSrOut, uint256 deadline) external;
+    function swapJuniorToSenior(address market, uint256 jrIn, uint256 uaToBorrow, uint256 minSrOut, uint256 deadline)
+        external;
 
     /**
      * @notice Swap senior tranche tokens for junior tranche tokens
@@ -163,7 +168,8 @@ interface IRouter {
      * @param minJrOut Minimum amount of junior tokens to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
      */
-    function swapSeniorToJunior(address market, uint256 srIn, uint256 uaToBorrow, uint256 minJrOut, uint256 deadline) external;
+    function swapSeniorToJunior(address market, uint256 srIn, uint256 uaToBorrow, uint256 minJrOut, uint256 deadline)
+        external;
 
     // ============ View Functions ============
 
@@ -174,5 +180,4 @@ interface IRouter {
      * @return srNeeded Amount of senior tokens needed
      */
     function calculateSeniorNeeded(uint256 jrAmount, address market) external view returns (uint256 srNeeded);
-
 }

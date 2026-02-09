@@ -27,7 +27,7 @@ contract TrancheMarketLiquidationTest is Test {
 
         ua = new ERC20Mock("Underlying Asset", "UA");
         oracle = new MockChainlinkAggregator(8, "UA / USD");
-        oracle.setRoundData(100000000, block.timestamp);
+        oracle.setRoundData(100_000_000, block.timestamp);
 
         TrancheMarket.MarketParams memory params = _liquidationMarketParams();
         market = new TrancheMarket(params);
@@ -77,7 +77,7 @@ contract TrancheMarketLiquidationTest is Test {
         uint256 liqPrice = market.liquidationPrice();
         uint256 belowLiqPrice = (liqPrice * 99) / 100;
         // forge-lint: disable-next-line(unsafe-typecast)
-        int256 oracle8Dec = int256((belowLiqPrice * 100000000) / ONE);
+        int256 oracle8Dec = int256((belowLiqPrice * 100_000_000) / ONE);
         oracle.setRoundData(oracle8Dec, block.timestamp);
     }
 
@@ -101,10 +101,8 @@ contract TrancheMarketLiquidationTest is Test {
         uint256 buffer = market.liquidationBuffer();
         uint256 reward = market.liquidationReward();
 
-        uint256 expectedLiqPrice = _mulDown(
-            initialPrice,
-            _mulDown(seniorRatio, ONE + seniorFloor) + _mulDown(juniorRatio, buffer + reward)
-        );
+        uint256 expectedLiqPrice =
+            _mulDown(initialPrice, _mulDown(seniorRatio, ONE + seniorFloor) + _mulDown(juniorRatio, buffer + reward));
 
         assertEq(market.liquidationPrice(), expectedLiqPrice);
     }
@@ -218,7 +216,7 @@ contract TrancheMarketLiquidationTest is Test {
         disabledMarket.tranche(100e18, user);
         vm.stopPrank();
 
-        oracle.setRoundData(50000000, block.timestamp);
+        oracle.setRoundData(50_000_000, block.timestamp);
 
         vm.prank(admin);
         vm.expectRevert(ITrancheMarket.LiquidationNotEnabled.selector);
@@ -229,7 +227,7 @@ contract TrancheMarketLiquidationTest is Test {
         vm.prank(user);
         market.tranche(100e18, user);
 
-        oracle.setRoundData(100000000, block.timestamp);
+        oracle.setRoundData(100_000_000, block.timestamp);
 
         vm.prank(admin);
         vm.expectRevert(ITrancheMarket.LiquidationConditionNotMet.selector);
@@ -287,7 +285,7 @@ contract TrancheMarketLiquidationTest is Test {
         vm.prank(user);
         market.tranche(100e18, user);
 
-        oracle.setRoundData(100000000, block.timestamp);
+        oracle.setRoundData(100_000_000, block.timestamp);
 
         (bool canLiquidate,,,,) = market.previewLiquidation();
         assertFalse(canLiquidate);
@@ -312,10 +310,9 @@ contract TrancheMarketLiquidationTest is Test {
         disabledMarket.tranche(100e18, user);
         vm.stopPrank();
 
-        oracle.setRoundData(50000000, block.timestamp);
+        oracle.setRoundData(50_000_000, block.timestamp);
 
         (bool canLiquidate,,,,) = disabledMarket.previewLiquidation();
         assertFalse(canLiquidate);
     }
-
 }

@@ -25,7 +25,7 @@ contract TrancheMarketFinalizeTest is Test {
 
         ua = new ERC20Mock("Underlying Asset", "UA");
         oracle = new MockChainlinkAggregator(8, "UA / USD");
-        oracle.setRoundData(100000000, block.timestamp);
+        oracle.setRoundData(100_000_000, block.timestamp);
 
         TrancheMarket.MarketParams memory params = _defaultMarketParams();
         market = new TrancheMarket(params);
@@ -38,7 +38,7 @@ contract TrancheMarketFinalizeTest is Test {
         market.tranche(100e18, user);
 
         vm.warp(block.timestamp + MONTH + 1);
-        oracle.setRoundData(100000000, block.timestamp);
+        oracle.setRoundData(100_000_000, block.timestamp);
     }
 
     function _defaultMarketParams() internal view returns (TrancheMarket.MarketParams memory) {
@@ -66,25 +66,25 @@ contract TrancheMarketFinalizeTest is Test {
     }
 
     function test_Finalize_AcceptPriceWithinDeviation() public {
-        oracle.setRoundData(105000000, block.timestamp);
+        oracle.setRoundData(105_000_000, block.timestamp);
 
         vm.prank(admin);
-        market.finalize(1e18, 0.10e18);
+        market.finalize(1e18, 0.1e18);
 
         assertTrue(market.finalized());
     }
 
     function test_Finalize_HandleNegativeDeviation() public {
-        oracle.setRoundData(95000000, block.timestamp);
+        oracle.setRoundData(95_000_000, block.timestamp);
 
         vm.prank(admin);
-        market.finalize(1e18, 0.10e18);
+        market.finalize(1e18, 0.1e18);
 
         assertTrue(market.finalized());
     }
 
     function test_Finalize_EmitEvent() public {
-        oracle.setRoundData(101000000, block.timestamp);
+        oracle.setRoundData(101_000_000, block.timestamp);
 
         vm.prank(admin);
         vm.expectEmit(false, false, false, false);
@@ -93,7 +93,7 @@ contract TrancheMarketFinalizeTest is Test {
     }
 
     function test_RevertWhen_Finalize_DeviationExceeded() public {
-        oracle.setRoundData(110000000, block.timestamp);
+        oracle.setRoundData(110_000_000, block.timestamp);
 
         vm.prank(admin);
         vm.expectRevert(ITrancheMarket.OraclePriceDeviationExceeded.selector);
@@ -121,7 +121,7 @@ contract TrancheMarketFinalizeTest is Test {
     }
 
     function test_RevertWhen_Finalize_OracleReturnsNegativePrice() public {
-        oracle.setRoundData(-100000000, block.timestamp);
+        oracle.setRoundData(-100_000_000, block.timestamp);
 
         vm.prank(admin);
         vm.expectRevert(ITrancheMarket.OracleInvalidPrice.selector);
@@ -129,7 +129,7 @@ contract TrancheMarketFinalizeTest is Test {
     }
 
     function test_RevertWhen_Finalize_OraclePriceStale() public {
-        oracle.setRoundData(100000000, block.timestamp - 25 hours);
+        oracle.setRoundData(100_000_000, block.timestamp - 25 hours);
 
         vm.prank(admin);
         vm.expectRevert(ITrancheMarket.OracleStalePrice.selector);
@@ -160,7 +160,7 @@ contract TrancheMarketFinalizeTest is Test {
     }
 
     function test_Waterfall_SurplusScenario() public {
-        oracle.setRoundData(101000000, block.timestamp);
+        oracle.setRoundData(101_000_000, block.timestamp);
 
         vm.prank(admin);
         market.finalize(1.01e18, 0.01e18);
@@ -170,7 +170,7 @@ contract TrancheMarketFinalizeTest is Test {
     }
 
     function test_Waterfall_CompressionScenario() public {
-        oracle.setRoundData(100400000, block.timestamp);
+        oracle.setRoundData(100_400_000, block.timestamp);
 
         vm.prank(admin);
         market.finalize(1.004e18, 0.01e18);
@@ -188,17 +188,17 @@ contract TrancheMarketFinalizeTest is Test {
     }
 
     function test_Waterfall_SevereLossScenario() public {
-        oracle.setRoundData(70000000, block.timestamp);
+        oracle.setRoundData(70_000_000, block.timestamp);
 
         vm.prank(admin);
-        market.finalize(0.70e18, 0.01e18);
+        market.finalize(0.7e18, 0.01e18);
 
         assertEq(market.jrRateUA(), 0);
         assertGt(market.srRateUA(), 0);
     }
 
     function test_PreviewSettlement_ReturnProjectedRates() public {
-        oracle.setRoundData(101000000, block.timestamp);
+        oracle.setRoundData(101_000_000, block.timestamp);
 
         (uint256 srRate, uint256 jrRate, uint256 oraclePrice) = market.previewSettlement();
 
@@ -208,7 +208,7 @@ contract TrancheMarketFinalizeTest is Test {
     }
 
     function test_PreviewSettlement_DoesNotModifyState() public {
-        oracle.setRoundData(101000000, block.timestamp);
+        oracle.setRoundData(101_000_000, block.timestamp);
 
         market.previewSettlement();
         market.previewSettlement();
@@ -219,7 +219,7 @@ contract TrancheMarketFinalizeTest is Test {
     }
 
     function test_PreviewSettlement_MatchFinalizeRates() public {
-        oracle.setRoundData(101000000, block.timestamp);
+        oracle.setRoundData(101_000_000, block.timestamp);
 
         (uint256 previewSrRate, uint256 previewJrRate, uint256 previewPrice) = market.previewSettlement();
 
@@ -238,7 +238,7 @@ contract TrancheMarketFinalizeTest is Test {
     }
 
     function test_RevertWhen_PreviewSettlement_StaleOraclePrice() public {
-        oracle.setRoundData(100000000, block.timestamp - 25 hours);
+        oracle.setRoundData(100_000_000, block.timestamp - 25 hours);
 
         vm.expectRevert(ITrancheMarket.OracleStalePrice.selector);
         market.previewSettlement();

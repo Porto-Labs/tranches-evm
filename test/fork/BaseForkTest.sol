@@ -25,16 +25,15 @@ interface IPositionManager {
         uint256 deadline;
     }
 
-    function createAndInitializePoolIfNecessary(
-        address token0,
-        address token1,
-        uint24 fee,
-        uint160 sqrtPriceX96
-    ) external payable returns (address pool);
+    function createAndInitializePoolIfNecessary(address token0, address token1, uint24 fee, uint160 sqrtPriceX96)
+        external
+        payable
+        returns (address pool);
 
-    function mint(
-        MintParams calldata params
-    ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+    function mint(MintParams calldata params)
+        external
+        payable
+        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
 }
 
 abstract contract BaseForkTest is Test {
@@ -133,7 +132,7 @@ abstract contract BaseForkTest is Test {
             token1 = address(prime);
         }
 
-        uint160 sqrtPriceX96 = 79228162514264337593543950336;
+        uint160 sqrtPriceX96 = 79_228_162_514_264_337_593_543_950_336;
 
         uniswapPool = positionManager.createAndInitializePoolIfNecessary(token0, token1, POOL_FEE, sqrtPriceX96);
     }
@@ -163,8 +162,8 @@ abstract contract BaseForkTest is Test {
             amount1Desired = LP_PRIME_AMOUNT;
         }
 
-        int24 tickLower = -1000;  // -887220
-        int24 tickUpper = 1000;   // 887220
+        int24 tickLower = -1000; // -887220
+        int24 tickUpper = 1000; // 887220
 
         IPositionManager.MintParams memory params = IPositionManager.MintParams({
             token0: token0,
@@ -200,11 +199,7 @@ abstract contract BaseForkTest is Test {
         usdc = new ERC20Mock("USD Coin", "USDC");
 
         MarketParams memory primeMarketParams = MarketParams({
-            loanToken: address(prime),
-            collateralToken: address(usdc),
-            oracle: address(0),
-            irm: address(0),
-            lltv: lltv
+            loanToken: address(prime), collateralToken: address(usdc), oracle: address(0), irm: address(0), lltv: lltv
         });
         morphoContract.createMarket(primeMarketParams);
 

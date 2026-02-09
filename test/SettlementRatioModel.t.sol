@@ -29,12 +29,10 @@ contract SettlementRatioModelTest is Test {
         return (a * b) / ONE;
     }
 
-    function _assertNoOverDistribution(
-        uint256 uaQuantity,
-        uint256 seniorRatio,
-        uint256 srRateUA,
-        uint256 jrRateUA
-    ) internal pure {
+    function _assertNoOverDistribution(uint256 uaQuantity, uint256 seniorRatio, uint256 srRateUA, uint256 jrRateUA)
+        internal
+        pure
+    {
         uint256 srSupply = _mulDown(uaQuantity, seniorRatio);
         uint256 jrSupply = uaQuantity - srSupply;
         uint256 srDistributed = _mulDown(srSupply, srRateUA);
@@ -65,7 +63,8 @@ contract SettlementRatioModelTest is Test {
         uint256 srPrincipal = 70e18;
         uint256 seniorFloorYield = 0.0033e18;
         uint256 seniorTargetYield = 0.005e18;
-        (uint256 srFloorUsd, uint256 srTargetUsd) = settlementModel.calculateThresholds(srPrincipal, seniorFloorYield, seniorTargetYield);
+        (uint256 srFloorUsd, uint256 srTargetUsd) =
+            settlementModel.calculateThresholds(srPrincipal, seniorFloorYield, seniorTargetYield);
         assertEq(srFloorUsd, 70.231e18);
         assertEq(srTargetUsd, 70.35e18);
     }
@@ -82,7 +81,8 @@ contract SettlementRatioModelTest is Test {
         uint256 srTargetUsd = 70.35e18;
         uint256 totalValueUsd = 101e18;
 
-        (uint256 seniorPayout, uint256 juniorPayout) = settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
+        (uint256 seniorPayout, uint256 juniorPayout) =
+            settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
         assertEq(seniorPayout, srTargetUsd);
         assertEq(juniorPayout, totalValueUsd - srTargetUsd);
     }
@@ -93,7 +93,8 @@ contract SettlementRatioModelTest is Test {
         uint256 srTargetUsd = 70.35e18;
         uint256 totalValueUsd = 100.3e18;
 
-        (uint256 seniorPayout, uint256 juniorPayout) = settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
+        (uint256 seniorPayout, uint256 juniorPayout) =
+            settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
         assertEq(seniorPayout, totalValueUsd - jrPrincipalUsd);
         assertEq(juniorPayout, jrPrincipalUsd);
     }
@@ -104,7 +105,8 @@ contract SettlementRatioModelTest is Test {
         uint256 srTargetUsd = 70.35e18;
         uint256 totalValueUsd = 100e18;
 
-        (uint256 seniorPayout, uint256 juniorPayout) = settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
+        (uint256 seniorPayout, uint256 juniorPayout) =
+            settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
         assertEq(seniorPayout, srFloorUsd);
         assertEq(juniorPayout, totalValueUsd - srFloorUsd);
     }
@@ -115,7 +117,8 @@ contract SettlementRatioModelTest is Test {
         uint256 srTargetUsd = 70.35e18;
         uint256 totalValueUsd = 60e18;
 
-        (uint256 seniorPayout, uint256 juniorPayout) = settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
+        (uint256 seniorPayout, uint256 juniorPayout) =
+            settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
         assertEq(seniorPayout, totalValueUsd);
         assertEq(juniorPayout, 0);
     }
@@ -126,7 +129,8 @@ contract SettlementRatioModelTest is Test {
         uint256 srTargetUsd = 70.35e18;
         uint256 totalValueUsd = 0;
 
-        (uint256 seniorPayout, uint256 juniorPayout) = settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
+        (uint256 seniorPayout, uint256 juniorPayout) =
+            settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
         assertEq(seniorPayout, 0);
         assertEq(juniorPayout, 0);
     }
@@ -137,7 +141,8 @@ contract SettlementRatioModelTest is Test {
         uint256 srTargetUsd = 70.35e18;
         uint256 totalValueUsd = srTargetUsd + jrPrincipalUsd;
 
-        (uint256 seniorPayout, uint256 juniorPayout) = settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
+        (uint256 seniorPayout, uint256 juniorPayout) =
+            settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
         assertEq(seniorPayout, srTargetUsd);
         assertEq(juniorPayout, jrPrincipalUsd);
     }
@@ -148,7 +153,8 @@ contract SettlementRatioModelTest is Test {
         uint256 srTargetUsd = 70.35e18;
         uint256 totalValueUsd = srFloorUsd + jrPrincipalUsd;
 
-        (uint256 seniorPayout, uint256 juniorPayout) = settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
+        (uint256 seniorPayout, uint256 juniorPayout) =
+            settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
         assertEq(seniorPayout, srFloorUsd);
         assertEq(juniorPayout, jrPrincipalUsd);
     }
@@ -194,7 +200,7 @@ contract SettlementRatioModelTest is Test {
 
     function test_CalculateSettlement_JuniorWipeoutScenario() public {
         SettlementRatioModel.SettlementParams memory params = _defaultParams();
-        params.maturityPrice = 0.70e18;
+        params.maturityPrice = 0.7e18;
 
         SettlementRatioModel.SettlementResult memory result = settlementModel.calculateSettlement(params);
         assertEq(result.jrRateUA, 0);
@@ -203,7 +209,7 @@ contract SettlementRatioModelTest is Test {
 
     function test_CalculateSettlement_SevereLossScenario() public {
         SettlementRatioModel.SettlementParams memory params = _defaultParams();
-        params.maturityPrice = 0.50e18;
+        params.maturityPrice = 0.5e18;
 
         SettlementRatioModel.SettlementResult memory result = settlementModel.calculateSettlement(params);
         assertEq(result.jrRateUA, 0);
@@ -244,7 +250,7 @@ contract SettlementRatioModelTest is Test {
     function test_CalculateSettlement_EightDecimalQuantityJuniorWipeout() public {
         SettlementRatioModel.SettlementParams memory params = _defaultParams();
         params.uaQuantity = 100e8;
-        params.maturityPrice = 0.70e18;
+        params.maturityPrice = 0.7e18;
 
         SettlementRatioModel.SettlementResult memory result = settlementModel.calculateSettlement(params);
         assertEq(result.jrRateUA, 0);

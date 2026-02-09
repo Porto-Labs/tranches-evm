@@ -26,7 +26,7 @@ contract TrancheMarketTest is Test {
 
         ua = new ERC20Mock("Underlying Asset", "UA");
         oracle = new MockChainlinkAggregator(8, "UA / USD");
-        oracle.setRoundData(100000000, block.timestamp);
+        oracle.setRoundData(100_000_000, block.timestamp);
 
         TrancheMarket.MarketParams memory params = _defaultMarketParams();
         market = new TrancheMarket(params);
@@ -122,7 +122,7 @@ contract TrancheMarketTest is Test {
         market.tranche(100e18, user);
 
         vm.warp(block.timestamp + MONTH + 1);
-        oracle.setRoundData(150000000, block.timestamp);
+        oracle.setRoundData(150_000_000, block.timestamp);
 
         (,, uint256 oraclePrice) = market.previewSettlement();
         assertEq(oraclePrice, 1.5e18);
@@ -150,7 +150,7 @@ contract TrancheMarketTest is Test {
 
     function test_OracleScaling_6Decimals() public {
         MockChainlinkAggregator oracle6 = new MockChainlinkAggregator(6, "UA / USD");
-        oracle6.setRoundData(2000000, block.timestamp);
+        oracle6.setRoundData(2_000_000, block.timestamp);
 
         TrancheMarket.MarketParams memory params = _defaultMarketParams();
         params.priceFeed = address(oracle6);
@@ -162,7 +162,7 @@ contract TrancheMarketTest is Test {
         vm.stopPrank();
 
         vm.warp(block.timestamp + MONTH + 1);
-        oracle6.setRoundData(2000000, block.timestamp);
+        oracle6.setRoundData(2_000_000, block.timestamp);
 
         (,, uint256 oraclePrice) = market6.previewSettlement();
         assertEq(oraclePrice, 2e18);

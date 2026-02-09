@@ -4,7 +4,8 @@ pragma solidity ^0.8.23;
 /**
  * @title ITrancheMarket
  * @notice Interface for the Porto Tranching mechanism (UA = srUA + jrUA) - V1
- * @dev Defines the complete lifecycle: tokenize, redeem pre-maturity, finalize (admin-controlled), redeem post-maturity and liquidation
+ * @dev Defines the complete lifecycle: tokenize, redeem pre-maturity, finalize (admin-controlled), redeem post-maturity
+ * and liquidation
  */
 interface ITrancheMarket {
     // ============ Events ============
@@ -265,7 +266,7 @@ interface ITrancheMarket {
      */
     function previewSettlement() external view returns (uint256 srRateUA, uint256 jrRateUA, uint256 oraclePrice);
 
-/// @notice Returns swap parameters for Router in a single call
+    /// @notice Returns swap parameters for Router in a single call
     /// @return uaAddress Underlying Asset token address
     /// @return srAddress Senior tranche token address
     /// @return jrAddress Junior tranche token address

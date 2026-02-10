@@ -204,7 +204,6 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
         initiateFlashLoan
     {
         if (jrIn == 0) revert ZeroAmount();
-
         (address uaAddress,, address jrAddress,) = ITrancheMarket(market).getSwapParameters();
 
         IERC20(jrAddress).safeTransferFrom(msg.sender, address(this), jrIn);
@@ -387,11 +386,13 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
         IERC20(uaAddress).forceApprove(address(morpho), uaBorrowed);
         IERC20(jrAddress).safeTransfer(user, jrMinted);
 
+        uint256 uaDust;
         if (uaReceived > uaBorrowed) {
-            IERC20(uaAddress).safeTransfer(user, uaReceived - uaBorrowed);
+            uaDust = uaReceived - uaBorrowed;
+            IERC20(uaAddress).safeTransfer(user, uaDust);
         }
 
-        emit BuyJunior(user, uaIn, jrMinted);
+        emit BuyJunior(user, uaIn, jrMinted, uaDust);
     }
 
     /**
@@ -491,11 +492,13 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
         IERC20(uaAddress).forceApprove(address(morpho), uaBorrowed);
         IERC20(jrAddress).safeTransfer(user, jrMinted);
 
+        uint256 uaDust;
         if (uaReceived > uaBorrowed) {
-            IERC20(uaAddress).safeTransfer(user, uaReceived - uaBorrowed);
+            uaDust = uaReceived - uaBorrowed;
+            IERC20(uaAddress).safeTransfer(user, uaDust);
         }
 
-        emit SwapSeniorToJunior(user, srIn, jrMinted);
+        emit SwapSeniorToJunior(user, srIn, jrMinted, uaDust);
     }
 
     // ============ View Functions ============

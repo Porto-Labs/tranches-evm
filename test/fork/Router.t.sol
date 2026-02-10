@@ -7,7 +7,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IUniswapV3Pool } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { IRouter } from "src/interfaces/IRouter.sol";
-import { console } from "forge-std/Test.sol";
+import { console, Vm } from "forge-std/Test.sol";
 import { IQuoterV2 } from "@uniswap/v3-periphery/contracts/interfaces/IQuoterV2.sol";
 
 contract TrancheMarketRWATest is BaseForkTest {
@@ -349,6 +349,71 @@ contract TrancheMarketRWATest is BaseForkTest {
 
         assertEq(userSrBefore - userSrAfter, swapAmount);
         assertGt(userJrAfter - userJrBefore, 0);
+    }
+
+    function test_BuyJunior_EmitEventWithUaDust() public {
+        address jrToken = market.jrToken();
+        address uaToken = market.uaToken();
+
+        address buyUser = makeAddr("buyJuniorUser");
+        uint256 buyAmount = 100_000e18;
+
+        prime.mint(buyUser, buyAmount);
+        _adjustPoolPriceBySellingSr(600_000e18);
+
+        uint256 userSlippage = 9800;
+        (uint256 uaToBorrow, uint256 minJrOut) = _calculateFromUaInput(buyAmount, userSlippage);
+
+        vm.startPrank(buyUser);
+        prime.approve(address(router), buyAmount);
+
+        vm.recordLogs();
+        router.buyJunior(address(market), buyAmount, uaToBorrow, minJrOut, block.timestamp + 1 minutes);
+        vm.stopPrank();
+
+        // BuyJunior is emitted in the callback; Morpho Approval + Transfer follow after repayment
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        (uint256 uaIn, uint256 jrOut, uint256 uaDust) =
+            abi.decode(logs[logs.length - 3].data, (uint256, uint256, uint256));
+
+        assertEq(uaIn, buyAmount);
+        assertApproxEqAbs(jrOut, 94_131e18, 1e18);
+        assertApproxEqAbs(uaDust, 10e18, 1e18);
+        assertEq(uaDust, IERC20(uaToken).balanceOf(buyUser));
+        assertEq(jrOut, IERC20(jrToken).balanceOf(buyUser));
+    }
+
+    function test_SwapSeniorToJunior_EmitEventWithUaDust() public {
+        address srToken = market.srToken();
+        address uaToken = market.uaToken();
+        address jrToken = market.jrToken();
+        uint256 swapAmount = 100_000e18;
+
+        _adjustPoolPriceBySellingSr(600_000e18);
+
+        uint256 userSlippage = 9800;
+        (uint256 uaToBorrow, uint256 minJrOut) = _calculateFromSrInput(swapAmount, userSlippage);
+
+        uint256 userUaBefore = IERC20(uaToken).balanceOf(user3);
+        uint256 userJrBefore = IERC20(jrToken).balanceOf(user3);
+
+        vm.startPrank(user3);
+        IERC20(srToken).approve(address(router), swapAmount);
+
+        vm.recordLogs();
+        router.swapSeniorToJunior(address(market), swapAmount, uaToBorrow, minJrOut, block.timestamp + 1 minutes);
+        vm.stopPrank();
+
+        // SwapSeniorToJunior is emitted in the callback; Morpho Approval + Transfer follow after repayment
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        (uint256 srIn, uint256 jrOut, uint256 uaDust) =
+            abi.decode(logs[logs.length - 3].data, (uint256, uint256, uint256));
+
+        assertEq(srIn, swapAmount);
+        assertApproxEqAbs(jrOut, 91_427e18, 1e18);
+        assertApproxEqAbs(uaDust, 26e18, 1e18);
+        assertEq(uaDust, IERC20(uaToken).balanceOf(user3) - userUaBefore);
+        assertEq(jrOut, IERC20(jrToken).balanceOf(user3) - userJrBefore);
     }
 
     function test_BuySenior_Success() public {

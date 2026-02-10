@@ -38,8 +38,9 @@ interface IRouter {
      * @param buyer Address that bought the tokens
      * @param uaIn Amount of UA deposited
      * @param jrOut Amount of junior tokens received
+     * @param uaDust Amount of leftover UA returned to buyer
      */
-    event BuyJunior(address indexed buyer, uint256 uaIn, uint256 jrOut);
+    event BuyJunior(address indexed buyer, uint256 uaIn, uint256 jrOut, uint256 uaDust);
 
     /**
      * @notice Emitted when junior tokens are swapped for senior tokens
@@ -54,8 +55,9 @@ interface IRouter {
      * @param user Address that performed the swap
      * @param srIn Amount of senior tokens swapped
      * @param jrOut Amount of junior tokens received
+     * @param uaDust Amount of leftover UA returned to user
      */
-    event SwapSeniorToJunior(address indexed user, uint256 srIn, uint256 jrOut);
+    event SwapSeniorToJunior(address indexed user, uint256 srIn, uint256 jrOut, uint256 uaDust);
 
     // ============ Errors ============
 

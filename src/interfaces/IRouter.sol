@@ -10,6 +10,13 @@ interface IRouter {
     // ============ Events ============
 
     /**
+     * @notice Emitted when a market whitelist status is changed
+     * @param market Address of the market
+     * @param whitelisted Whether the market is whitelisted
+     */
+    event MarketWhitelistChanged(address indexed market, bool whitelisted);
+
+    /**
      * @notice Emitted when senior tokens are bought
      * @param buyer Address that bought the tokens
      * @param uaIn Amount of UA deposited
@@ -67,6 +74,9 @@ interface IRouter {
     /// @notice Thrown when callback caller is not Morpho
     error RouterUnauthorizedCallback();
 
+    /// @notice Thrown when flash loan callback is called without an active flash loan
+    error FlashLoanNotInitiated();
+
     /// @notice Thrown when output is less than minimum required
     error InsufficientOutput();
 
@@ -75,6 +85,12 @@ interface IRouter {
 
     /// @notice Thrown when input amount is zero
     error ZeroAmount();
+
+    /// @notice Thrown when caller is not the admin
+    error OnlyAdmin();
+
+    /// @notice Thrown when market is not whitelisted
+    error MarketNotWhitelisted();
 
     // ============ Core Functions ============
 
@@ -172,6 +188,15 @@ interface IRouter {
      */
     function swapSeniorToJunior(address market, uint256 srIn, uint256 uaToBorrow, uint256 minJrOut, uint256 deadline)
         external;
+
+    // ============ Admin Functions ============
+
+    /**
+     * @notice Set the whitelist status of a market
+     * @param market Address of the market
+     * @param whitelisted Whether the market should be whitelisted
+     */
+    function setMarketWhitelisted(address market, bool whitelisted) external;
 
     // ============ View Functions ============
 

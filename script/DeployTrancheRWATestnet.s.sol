@@ -244,7 +244,7 @@ contract DeployTrancheRWATestnet is Script {
     function _deployRouter() internal {
         console.log("\n=== Deploying Router ===");
 
-        router = new Router(UNISWAP_V3_SWAP_ROUTER_SEPOLIA, MORPHO_SEPOLIA);
+        router = new Router(UNISWAP_V3_SWAP_ROUTER_SEPOLIA, MORPHO_SEPOLIA, msg.sender);
 
         console.log("Router deployed at:", address(router));
     }

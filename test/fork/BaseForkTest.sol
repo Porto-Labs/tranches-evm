@@ -209,7 +209,9 @@ abstract contract BaseForkTest is Test {
     }
 
     function _deployRouter() internal {
-        router = new Router(UNISWAP_V3_SWAP_ROUTER_SEPOLIA, morpho);
+        router = new Router(UNISWAP_V3_SWAP_ROUTER_SEPOLIA, morpho, admin);
+        vm.prank(admin);
+        router.setMarketWhitelisted(address(market), true);
     }
 
     function _setOraclePrice(uint256 price18Decimals) internal {

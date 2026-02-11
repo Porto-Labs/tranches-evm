@@ -37,10 +37,28 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
     /// @notice Morpho Blue contract for flash loans
     IMorphoBase public immutable morpho;
 
+    /// @notice Admin address
+    address public admin;
+
+    /// @notice Whitelisted markets
+    mapping(address => bool) public whitelistedMarkets;
+
     /// @notice Transient flag to verify callback originates from this contract's flash loan
     bool private transient _flashLoanInitiated;
 
     // ============ Modifiers ============
+
+    /// @notice Restricts function access to admin only
+    modifier onlyAdmin() {
+        if (msg.sender != admin) revert OnlyAdmin();
+        _;
+    }
+
+    /// @notice Ensures the market is whitelisted
+    modifier onlyWhitelisted(address market) {
+        if (!whitelistedMarkets[market]) revert MarketNotWhitelisted();
+        _;
+    }
 
     /// @notice Ensures transaction is executed before deadline
     modifier checkDeadline(uint256 deadline) {
@@ -67,13 +85,14 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param _swapRouter Uniswap V3 SwapRouter address
      * @param _morpho Morpho Blue contract address
      */
-    constructor(address _swapRouter, address _morpho) {
-        if (_swapRouter == address(0) || _morpho == address(0)) {
+    constructor(address _swapRouter, address _morpho, address _admin) {
+        if (_swapRouter == address(0) || _morpho == address(0) || _admin == address(0)) {
             revert ZeroAddress();
         }
 
         swapRouter = IV3SwapRouter(_swapRouter);
         morpho = IMorphoBase(_morpho);
+        admin = _admin;
     }
 
     // ============ Core Functions ============
@@ -90,6 +109,7 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
     function buySenior(address market, uint256 uaIn, uint256 minSrOut, uint256 deadline)
         external
         override
+        onlyWhitelisted(market)
         checkDeadline(deadline)
         returns (uint256 srOut)
     {
@@ -128,6 +148,7 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
     function sellSenior(address market, uint256 srIn, uint256 minUaOut, uint256 deadline)
         external
         override
+        onlyWhitelisted(market)
         checkDeadline(deadline)
         returns (uint256 uaOut)
     {
@@ -169,6 +190,7 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
     function buyJunior(address market, uint256 uaIn, uint256 uaToBorrow, uint256 minJrOut, uint256 deadline)
         external
         override
+        onlyWhitelisted(market)
         checkDeadline(deadline)
         initiateFlashLoan
     {
@@ -200,6 +222,7 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
     function sellJunior(address market, uint256 jrIn, uint256 uaToBorrow, uint256 minUaOut, uint256 deadline)
         external
         override
+        onlyWhitelisted(market)
         checkDeadline(deadline)
         initiateFlashLoan
     {
@@ -232,6 +255,7 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
     function swapJuniorToSenior(address market, uint256 jrIn, uint256 uaToBorrow, uint256 minSrOut, uint256 deadline)
         external
         override
+        onlyWhitelisted(market)
         checkDeadline(deadline)
         initiateFlashLoan
     {
@@ -262,6 +286,7 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
     function swapSeniorToJunior(address market, uint256 srIn, uint256 uaToBorrow, uint256 minJrOut, uint256 deadline)
         external
         override
+        onlyWhitelisted(market)
         checkDeadline(deadline)
         initiateFlashLoan
     {
@@ -282,7 +307,7 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
      * @param data Encoded callback data
      */
     function onMorphoFlashLoan(uint256 assets, bytes calldata data) external override onlyMorpho {
-        if (!_flashLoanInitiated) revert RouterUnauthorizedCallback();
+        if (!_flashLoanInitiated) revert FlashLoanNotInitiated();
         _flashLoanInitiated = false;
 
         (address market, address user, uint256 amount, uint256 minOut, SwapOperation operation) =
@@ -499,6 +524,14 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
         }
 
         emit SwapSeniorToJunior(user, srIn, jrMinted, uaDust);
+    }
+
+    // ============ Admin Functions ============
+
+    function setMarketWhitelisted(address market, bool whitelisted) external override onlyAdmin {
+        if (market == address(0)) revert ZeroAddress();
+        whitelistedMarkets[market] = whitelisted;
+        emit MarketWhitelistChanged(market, whitelisted);
     }
 
     // ============ View Functions ============

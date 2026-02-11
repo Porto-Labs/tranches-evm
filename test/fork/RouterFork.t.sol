@@ -10,7 +10,7 @@ import { IRouter } from "src/interfaces/IRouter.sol";
 import { console, Vm } from "forge-std/Test.sol";
 import { IQuoterV2 } from "@uniswap/v3-periphery/contracts/interfaces/IQuoterV2.sol";
 
-contract TrancheMarketRWATest is BaseForkTest {
+contract RouterFork is BaseForkTest {
     address public user1;
     address public user2;
     address public user3;

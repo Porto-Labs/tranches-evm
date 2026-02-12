@@ -416,6 +416,68 @@ contract RouterFork is BaseForkTest {
         assertEq(jrOut, IERC20(jrToken).balanceOf(user3) - userJrBefore);
     }
 
+    function _calculateJrToSrSwap(uint256 jrIn, uint256 userSlippageBps)
+        internal
+        returns (uint256 uaToBorrow, uint256 minSrOut)
+    {
+        address srToken = market.srToken();
+
+        uint256 srNeededRouter = router.calculateSeniorNeeded(jrIn, address(market));
+
+        IQuoterV2 quoter = IQuoterV2(UNISWAP_V3_QUOTER_V2_SEPOLIA);
+        (uint256 uaNeeded,,,) = quoter.quoteExactOutputSingle(
+            IQuoterV2.QuoteExactOutputSingleParams({
+                tokenIn: address(prime),
+                tokenOut: srToken,
+                amount: srNeededRouter,
+                fee: POOL_FEE,
+                sqrtPriceLimitX96: 0
+            })
+        );
+
+        uaToBorrow = uaNeeded;
+
+        uint256 uaFromRecombine = jrIn * 1e18 / JUNIOR_RATIO;
+        uint256 remainingUa = uaFromRecombine - uaNeeded;
+
+        (uint256 expectedSrOut,,,) = quoter.quoteExactInputSingle(
+            IQuoterV2.QuoteExactInputSingleParams({
+                tokenIn: address(prime),
+                tokenOut: srToken,
+                amountIn: remainingUa,
+                fee: POOL_FEE,
+                sqrtPriceLimitX96: 0
+            })
+        );
+
+        minSrOut = expectedSrOut * userSlippageBps / 10_000;
+    }
+
+    function test_SwapJuniorToSenior_Success() public {
+        address jrToken = market.jrToken();
+        address srToken = market.srToken();
+        uint256 swapAmount = 10_000e18;
+
+        _adjustPoolPriceBySellingSr(600_000e18);
+
+        uint256 userSlippage = 9800;
+        (uint256 uaToBorrow, uint256 minSrOut) = _calculateJrToSrSwap(swapAmount, userSlippage);
+
+        uint256 userJrBefore = IERC20(jrToken).balanceOf(user1);
+        uint256 userSrBefore = IERC20(srToken).balanceOf(user1);
+
+        vm.startPrank(user1);
+        IERC20(jrToken).approve(address(router), swapAmount);
+        router.swapJuniorToSenior(address(market), swapAmount, uaToBorrow, minSrOut, block.timestamp + 1 minutes);
+        vm.stopPrank();
+
+        uint256 userJrAfter = IERC20(jrToken).balanceOf(user1);
+        uint256 userSrAfter = IERC20(srToken).balanceOf(user1);
+
+        assertEq(userJrBefore - userJrAfter, swapAmount);
+        assertGt(userSrAfter - userSrBefore, 0);
+    }
+
     function test_BuySenior_Success() public {
         address buyUser = makeAddr("buyUser");
         uint256 buyAmount = 100_000e18;
@@ -490,5 +552,94 @@ contract RouterFork is BaseForkTest {
 
         assertEq(userJrBefore - userJrAfter, sellAmount);
         assertGt(userUaAfter - userUaBefore, 0);
+    }
+
+    // ============ InsufficientOutput Revert Tests ============
+
+    function test_RevertWhen_BuySenior_InsufficientOutput() public {
+        address buyUser = makeAddr("buyUser");
+        uint256 buyAmount = 100_000e18;
+        prime.mint(buyUser, buyAmount);
+
+        uint256 minSrOut = buyAmount * 2;
+
+        vm.startPrank(buyUser);
+        prime.approve(address(router), buyAmount);
+        vm.expectRevert();
+        router.buySenior(address(market), buyAmount, minSrOut, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_SellSenior_InsufficientOutput() public {
+        uint256 sellAmount = 10_000e18;
+        uint256 minUaOut = sellAmount * 2;
+
+        vm.startPrank(user1);
+        IERC20(market.srToken()).approve(address(router), sellAmount);
+        vm.expectRevert();
+        router.sellSenior(address(market), sellAmount, minUaOut, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_BuyJunior_InsufficientOutput() public {
+        address buyUser = makeAddr("buyJuniorUser");
+        uint256 buyAmount = 100_000e18;
+
+        prime.mint(buyUser, buyAmount);
+        _adjustPoolPriceBySellingSr(600_000e18);
+
+        (uint256 uaToBorrow, uint256 expectedJrOut) = _calculateFromUaInput(buyAmount, 10_000);
+        uint256 minJrOut = expectedJrOut * 2;
+
+        vm.startPrank(buyUser);
+        prime.approve(address(router), buyAmount);
+        vm.expectRevert(IRouter.InsufficientOutput.selector);
+        router.buyJunior(address(market), buyAmount, uaToBorrow, minJrOut, block.timestamp + 1 minutes);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_SellJunior_InsufficientOutput() public {
+        uint256 sellAmount = 10_000e18;
+
+        _adjustPoolPriceBySellingSr(600_000e18);
+
+        (uint256 uaToBorrow, uint256 expectedUaOut) = _calculateFromJrInput(sellAmount, 10_000);
+        uint256 minUaOut = expectedUaOut * 2;
+
+        vm.startPrank(user1);
+        IERC20(market.jrToken()).approve(address(router), sellAmount);
+        vm.expectRevert(IRouter.InsufficientOutput.selector);
+        router.sellJunior(address(market), sellAmount, uaToBorrow, minUaOut, block.timestamp + 1 minutes);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_SwapJuniorToSenior_InsufficientOutput() public {
+        uint256 swapAmount = 10_000e18;
+
+        _adjustPoolPriceBySellingSr(600_000e18);
+
+        (uint256 uaToBorrow, uint256 expectedSrOut) = _calculateJrToSrSwap(swapAmount, 10_000);
+        uint256 minSrOut = expectedSrOut * 2;
+
+        vm.startPrank(user1);
+        IERC20(market.jrToken()).approve(address(router), swapAmount);
+        vm.expectRevert();
+        router.swapJuniorToSenior(address(market), swapAmount, uaToBorrow, minSrOut, block.timestamp + 1 minutes);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_SwapSeniorToJunior_InsufficientOutput() public {
+        uint256 swapAmount = 1000e18;
+
+        _adjustPoolPriceBySellingSr(600_000e18);
+
+        (uint256 uaToBorrow, uint256 expectedJrOut) = _calculateFromSrInput(swapAmount, 10_000);
+        uint256 minJrOut = expectedJrOut * 2;
+
+        vm.startPrank(user3);
+        IERC20(market.srToken()).approve(address(router), swapAmount);
+        vm.expectRevert(IRouter.InsufficientOutput.selector);
+        router.swapSeniorToJunior(address(market), swapAmount, uaToBorrow, minJrOut, block.timestamp + 1 minutes);
+        vm.stopPrank();
     }
 }

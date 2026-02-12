@@ -4,9 +4,11 @@ pragma solidity ^0.8.28;
 import { Test } from "forge-std/Test.sol";
 import { TrancheMarket } from "src/core/TrancheMarket.sol";
 import { TrancheToken } from "src/core/TrancheToken.sol";
-import { ERC20Mock } from "../mocks/ERC20Mock.sol";
+import { ERC20Mock, ERC20Mock6Decimals, ERC20Mock8Decimals } from "../mocks/ERC20Mock.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MockChainlinkAggregator } from "../mocks/MockChainlinkAggregator.sol";
 import { ITrancheMarket } from "src/interfaces/ITrancheMarket.sol";
+import { SettlementRatioModel } from "src/settlement/SettlementRatioModel.sol";
 
 contract TrancheMarketLiquidationTest is Test {
     TrancheMarket public market;
@@ -271,6 +273,14 @@ contract TrancheMarketLiquidationTest is Test {
         market.liquidate();
     }
 
+    function test_RevertWhen_Liquidate_ZeroUaBalance() public {
+        _setBelowLiquidationPrice();
+
+        vm.prank(admin);
+        vm.expectRevert(SettlementRatioModel.SettlementZeroQuantity.selector);
+        market.liquidate();
+    }
+
     function test_PreviewLiquidation_CanLiquidateTrue() public {
         vm.prank(user);
         market.tranche(100e18, user);
@@ -315,4 +325,94 @@ contract TrancheMarketLiquidationTest is Test {
         (bool canLiquidate,,,,) = disabledMarket.previewLiquidation();
         assertFalse(canLiquidate);
     }
+
+    // ============ Decimal Combination Helpers ============
+
+    function _deployUa(uint8 decimals_) internal returns (address) {
+        if (decimals_ == 6) return address(new ERC20Mock6Decimals("UA", "UA"));
+        if (decimals_ == 8) return address(new ERC20Mock8Decimals("UA", "UA"));
+        return address(new ERC20Mock("UA", "UA"));
+    }
+
+    function _oraclePrice(uint8 oracleDecimals_, uint256 price1e18) internal pure returns (int256) {
+        if (oracleDecimals_ < 18) {
+            return int256(price1e18 / 10 ** (18 - oracleDecimals_));
+        }
+        return int256(price1e18);
+    }
+
+
+    function _setupAndLiquidateDecimals(uint8 uaDec, uint8 oracleDec) internal returns (TrancheMarket) {
+        address _ua = _deployUa(uaDec);
+        MockChainlinkAggregator _oracle = new MockChainlinkAggregator(oracleDec, "UA / USD");
+        _oracle.setRoundData(_oraclePrice(oracleDec, 1e18), block.timestamp);
+
+        TrancheMarket.MarketParams memory params = TrancheMarket.MarketParams({
+            ua: _ua,
+            poolFee: 500,
+            expiry: block.timestamp + MONTH,
+            seniorRatio: 0.8e18,
+            admin: admin,
+            priceFeed: address(_oracle),
+            seniorFloor: 0.005e18,
+            seniorTarget: 0.01e18,
+            liquidationEnabled: true,
+            liquidationBuffer: 0.025e18,
+            liquidationReward: 0.025e18
+        });
+        TrancheMarket _market = new TrancheMarket(params);
+
+        uint256 trancheAmount = 100 * (10 ** uaDec);
+        ERC20Mock(_ua).mint(user, trancheAmount);
+
+        vm.startPrank(user);
+        IERC20(_ua).approve(address(_market), trancheAmount);
+        _market.tranche(trancheAmount, user);
+        vm.stopPrank();
+
+        uint256 liqPrice = _market.liquidationPrice();
+        uint256 belowLiqPrice = (liqPrice * 99) / 100;
+        _oracle.setRoundData(_oraclePrice(oracleDec, belowLiqPrice), block.timestamp);
+
+        uint256 adminBalBefore = IERC20(_ua).balanceOf(admin);
+
+        vm.prank(admin);
+        _market.liquidate();
+
+        uint256 adminBalAfter = IERC20(_ua).balanceOf(admin);
+
+        assertTrue(_market.finalized());
+        assertEq(_market.jrRateUA(), 0);
+        assertGt(adminBalAfter - adminBalBefore, 0);
+        assertGt(_market.srRateUA(), ONE);
+
+        return _market;
+    }
+
+    // ============ Liquidation - Decimal Combinations ============
+
+    function test_Liquidate_Ua6_Oracle6() public {
+        _setupAndLiquidateDecimals(6, 6);
+    }
+
+    function test_Liquidate_Ua6_Oracle8() public {
+        _setupAndLiquidateDecimals(6, 8);
+    }
+
+    function test_Liquidate_Ua6_Oracle18() public {
+        _setupAndLiquidateDecimals(6, 18);
+    }
+
+    function test_Liquidate_Ua8_Oracle6() public {
+        _setupAndLiquidateDecimals(8, 6);
+    }
+
+    function test_Liquidate_Ua8_Oracle8() public {
+        _setupAndLiquidateDecimals(8, 8);
+    }
+
+    function test_Liquidate_Ua8_Oracle18() public {
+        _setupAndLiquidateDecimals(8, 18);
+    }
+
 }

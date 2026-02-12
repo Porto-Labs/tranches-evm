@@ -23,6 +23,49 @@ contract RouterTest is Test {
         router = new Router(swapRouter, morpho, admin);
     }
 
+    // ============ Constructor Tests ============
+
+    function test_RevertWhen_Constructor_ZeroAddress() public {
+        address swapRouter = makeAddr("swapRouter");
+        address morpho = makeAddr("morpho");
+
+        vm.expectRevert(IRouter.ZeroAddress.selector);
+        new Router(address(0), morpho, admin);
+
+        vm.expectRevert(IRouter.ZeroAddress.selector);
+        new Router(swapRouter, address(0), admin);
+
+        vm.expectRevert(IRouter.ZeroAddress.selector);
+        new Router(swapRouter, morpho, address(0));
+    }
+
+    // ============ Zero Amount Tests ============
+
+    function test_RevertWhen_ZeroAmount_AllFunctions() public {
+        vm.prank(admin);
+        router.setMarketWhitelisted(marketAddress, true);
+
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.expectRevert(IRouter.ZeroAmount.selector);
+        router.buySenior(marketAddress, 0, 0, deadline);
+
+        vm.expectRevert(IRouter.ZeroAmount.selector);
+        router.sellSenior(marketAddress, 0, 0, deadline);
+
+        vm.expectRevert(IRouter.ZeroAmount.selector);
+        router.buyJunior(marketAddress, 0, 1e18, 0, deadline);
+
+        vm.expectRevert(IRouter.ZeroAmount.selector);
+        router.sellJunior(marketAddress, 0, 1e18, 0, deadline);
+
+        vm.expectRevert(IRouter.ZeroAmount.selector);
+        router.swapJuniorToSenior(marketAddress, 0, 1e18, 0, deadline);
+
+        vm.expectRevert(IRouter.ZeroAmount.selector);
+        router.swapSeniorToJunior(marketAddress, 0, 1e18, 0, deadline);
+    }
+
     // ============ Whitelist Tests ============
 
     function test_SetMarketWhitelisted_ToTrue() public {

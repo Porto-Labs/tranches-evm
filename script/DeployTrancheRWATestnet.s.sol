@@ -106,7 +106,7 @@ contract DeployTrancheRWATestnet is Script {
         TrancheMarket.MarketParams memory params = TrancheMarket.MarketParams({
             ua: address(prime),
             poolFee: POOL_FEE,
-            expiry: block.timestamp + MATURITY, // + 1 hour
+            matureAt: block.timestamp + MATURITY, // + 1 hour
             seniorRatio: SENIOR_RATIO,
             admin: msg.sender,
             priceFeed: address(oracle),
@@ -123,7 +123,7 @@ contract DeployTrancheRWATestnet is Script {
         console.log("Senior Token (srPRIME):", market.srToken());
         console.log("Junior Token (jrPRIME):", market.jrToken());
 
-        console.log("Maturity:", block.timestamp + MATURITY);
+        console.log("Maturity:", market.matureAt());
     }
 
     function _liquidityProviderTranche() internal {
@@ -264,9 +264,9 @@ contract DeployTrancheRWATestnet is Script {
         console.log("Uniswap Pool:       ", uniswapPool);
         console.log("Router:             ", address(router));
         console.log("----------------------------------------");
-        console.log("Maturity timestamp: ", market.expiry());
+        console.log("Maturity timestamp: ", market.matureAt());
         console.log("Current timestamp:  ", block.timestamp);
-        console.log("Time to maturity:   ", (market.expiry() - block.timestamp) / 60, "minutes");
+        console.log("Time to maturity:   ", (market.matureAt() - block.timestamp) / 60, "minutes");
         console.log("========================================");
         console.log("\n");
         console.log("To update oracle price, call:");

@@ -46,7 +46,7 @@ contract TrancheMarketFinalizeTest is Test {
         return TrancheMarket.MarketParams({
             ua: address(ua),
             poolFee: 500,
-            expiry: block.timestamp + MONTH,
+            matureAt: block.timestamp + MONTH,
             seniorRatio: 0.7e18,
             admin: admin,
             priceFeed: address(oracle),
@@ -141,7 +141,7 @@ contract TrancheMarketFinalizeTest is Test {
         TrancheMarket freshMarket = new TrancheMarket(_defaultMarketParams());
 
         vm.prank(admin);
-        vm.expectRevert(ITrancheMarket.TrancheMarketNotExpired.selector);
+        vm.expectRevert(ITrancheMarket.TrancheMarketNotMature.selector);
         freshMarket.finalize(1e18, 0.01e18);
     }
 
@@ -280,7 +280,7 @@ contract TrancheMarketFinalizeTest is Test {
         TrancheMarket.MarketParams memory params = TrancheMarket.MarketParams({
             ua: _ua,
             poolFee: 500,
-            expiry: block.timestamp + MONTH,
+            matureAt: block.timestamp + MONTH,
             seniorRatio: 0.7e18,
             admin: admin,
             priceFeed: address(_oracle),

@@ -43,7 +43,7 @@ contract TrancheMarketLiquidationTest is Test {
         return TrancheMarket.MarketParams({
             ua: address(ua),
             poolFee: 500,
-            expiry: block.timestamp + MONTH,
+            matureAt: block.timestamp + MONTH,
             seniorRatio: 0.8e18,
             admin: admin,
             priceFeed: address(oracle),
@@ -59,7 +59,7 @@ contract TrancheMarketLiquidationTest is Test {
         return TrancheMarket.MarketParams({
             ua: address(ua),
             poolFee: 500,
-            expiry: block.timestamp + MONTH,
+            matureAt: block.timestamp + MONTH,
             seniorRatio: 0.7e18,
             admin: admin,
             priceFeed: address(oracle),
@@ -236,7 +236,7 @@ contract TrancheMarketLiquidationTest is Test {
         market.liquidate();
     }
 
-    function test_RevertWhen_Liquidate_AfterExpiry() public {
+    function test_RevertWhen_Liquidate_AfterMatureAt() public {
         vm.prank(user);
         market.tranche(100e18, user);
 
@@ -244,7 +244,7 @@ contract TrancheMarketLiquidationTest is Test {
         _setBelowLiquidationPrice();
 
         vm.prank(admin);
-        vm.expectRevert(ITrancheMarket.LiquidationAfterExpiry.selector);
+        vm.expectRevert(ITrancheMarket.LiquidationAfterMatureAt.selector);
         market.liquidate();
     }
 
@@ -271,6 +271,29 @@ contract TrancheMarketLiquidationTest is Test {
         vm.prank(other);
         vm.expectRevert(ITrancheMarket.OnlyAdmin.selector);
         market.liquidate();
+    }
+
+    function test_RevertWhen_Recombine_AfterLiquidation() public {
+        vm.prank(user);
+        market.tranche(100e18, user);
+
+        _setBelowLiquidationPrice();
+
+        vm.prank(admin);
+        market.liquidate();
+
+        assertTrue(market.finalized());
+        assertEq(market.jrRateUA(), 0);
+
+        TrancheToken srToken = TrancheToken(market.srToken());
+        TrancheToken jrToken = TrancheToken(market.jrToken());
+
+        uint256 halfSr = srToken.balanceOf(user) / 2;
+        uint256 halfJr = jrToken.balanceOf(user) / 2;
+
+        vm.prank(user);
+        vm.expectRevert(ITrancheMarket.TrancheMarketAlreadyFinalized.selector);
+        market.recombine(halfSr, halfJr, user);
     }
 
     function test_RevertWhen_Liquidate_ZeroUaBalance() public {
@@ -350,7 +373,7 @@ contract TrancheMarketLiquidationTest is Test {
         TrancheMarket.MarketParams memory params = TrancheMarket.MarketParams({
             ua: _ua,
             poolFee: 500,
-            expiry: block.timestamp + MONTH,
+            matureAt: block.timestamp + MONTH,
             seniorRatio: 0.8e18,
             admin: admin,
             priceFeed: address(_oracle),

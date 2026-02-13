@@ -87,11 +87,8 @@ interface ITrancheMarket {
 
     // ============ Errors ============
 
-    /// @notice Thrown when attempting to tokenize or redeem pre-maturity after expiry
-    error TrancheMarketExpired();
-
-    /// @notice Thrown when attempting to finalize or redeem post-maturity before expiry
-    error TrancheMarketNotExpired();
+    /// @notice Thrown when attempting to finalize or redeem post-maturity before maturity
+    error TrancheMarketNotMature();
 
     /// @notice Thrown when attempting post-maturity redemption before finalize() is called
     error TrancheMarketNotFinalized();
@@ -111,8 +108,8 @@ interface ITrancheMarket {
     /// @notice Thrown when a zero address is provided where not allowed
     error ZeroAddress();
 
-    /// @notice Thrown when expiry is in the past or invalid
-    error TrancheInvalidExpiry();
+    /// @notice Thrown when matureAt is in the past or invalid
+    error TrancheInvalidMatureAt();
 
     /// @notice Thrown when weight sum doesn't equal ONE or weights are zero
     error TrancheInvalidWeights();
@@ -135,8 +132,8 @@ interface ITrancheMarket {
     /// @notice Thrown when liquidation conditions are not met (price above threshold)
     error LiquidationConditionNotMet();
 
-    /// @notice Thrown when liquidation is attempted after market expiry
-    error LiquidationAfterExpiry();
+    /// @notice Thrown when liquidation is attempted after market maturity
+    error LiquidationAfterMatureAt();
 
     /// @notice Thrown when liquidation buffer exceeds maximum allowed (2.5%)
     error LiquidationInvalidBuffer();
@@ -224,7 +221,7 @@ interface ITrancheMarket {
     function jrToken() external view returns (address);
 
     /// @notice Returns the maturity timestamp
-    function expiry() external view returns (uint256);
+    function matureAt() external view returns (uint256);
 
     /// @notice Returns whether the market has been finalized
     function finalized() external view returns (bool);

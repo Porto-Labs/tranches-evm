@@ -40,7 +40,7 @@ contract TrancheMarketTest is Test {
         return TrancheMarket.MarketParams({
             ua: address(ua),
             poolFee: 500,
-            expiry: block.timestamp + MONTH,
+            matureAt: block.timestamp + MONTH,
             seniorRatio: 0.7e18,
             admin: admin,
             priceFeed: address(oracle),
@@ -195,23 +195,15 @@ contract TrancheMarketTest is Test {
         new TrancheMarket(params);
     }
 
-    function test_RevertWhen_Constructor_ExpiryInPast() public {
+    function test_RevertWhen_Constructor_MatureAtInPast() public {
         TrancheMarket.MarketParams memory params = _defaultMarketParams();
-        params.expiry = block.timestamp;
+        params.matureAt = block.timestamp;
 
-        vm.expectRevert(ITrancheMarket.TrancheInvalidExpiry.selector);
+        vm.expectRevert(ITrancheMarket.TrancheInvalidMatureAt.selector);
         new TrancheMarket(params);
     }
 
     // ============ Tranche Guard Tests ============
-
-    function test_RevertWhen_Tranche_AfterExpiry() public {
-        vm.warp(block.timestamp + MONTH + 1);
-
-        vm.prank(user);
-        vm.expectRevert(ITrancheMarket.TrancheMarketExpired.selector);
-        market.tranche(100e18, user);
-    }
 
     function test_RevertWhen_Tranche_ZeroAmount() public {
         vm.prank(user);
@@ -226,17 +218,6 @@ contract TrancheMarketTest is Test {
     }
 
     // ============ Recombine Guard Tests ============
-
-    function test_RevertWhen_Recombine_AfterExpiry() public {
-        vm.prank(user);
-        market.tranche(100e18, user);
-
-        vm.warp(block.timestamp + MONTH + 1);
-
-        vm.prank(user);
-        vm.expectRevert(ITrancheMarket.TrancheMarketExpired.selector);
-        market.recombine(70e18, 30e18, user);
-    }
 
     function test_RevertWhen_Recombine_ZeroSrAmount() public {
         vm.prank(user);
@@ -272,6 +253,36 @@ contract TrancheMarketTest is Test {
         vm.prank(user);
         vm.expectRevert(ITrancheMarket.TrancheRatioMismatch.selector);
         market.recombine(50e18, 30e18, user);
+    }
+
+    function test_RevertWhen_Tranche_AfterFinalized() public {
+        vm.prank(user);
+        market.tranche(100e18, user);
+
+        vm.warp(block.timestamp + MONTH + 1);
+        oracle.setRoundData(100_000_000, block.timestamp);
+
+        vm.prank(admin);
+        market.finalize(1e18, 0.01e18);
+
+        vm.prank(user);
+        vm.expectRevert(ITrancheMarket.TrancheMarketAlreadyFinalized.selector);
+        market.tranche(100e18, user);
+    }
+
+    function test_RevertWhen_Recombine_AfterFinalized() public {
+        vm.prank(user);
+        market.tranche(100e18, user);
+
+        vm.warp(block.timestamp + MONTH + 1);
+        oracle.setRoundData(100_000_000, block.timestamp);
+
+        vm.prank(admin);
+        market.finalize(1e18, 0.01e18);
+
+        vm.prank(user);
+        vm.expectRevert(ITrancheMarket.TrancheMarketAlreadyFinalized.selector);
+        market.recombine(70e18, 30e18, user);
     }
 
     // ============ Redeem Guard Tests ============
@@ -393,7 +404,7 @@ contract TrancheMarketTest is Test {
         TrancheMarket.MarketParams memory params = TrancheMarket.MarketParams({
             ua: address(ua),
             poolFee: 500,
-            expiry: block.timestamp + MONTH,
+            matureAt: block.timestamp + MONTH,
             seniorRatio: 0.8e18,
             admin: admin,
             priceFeed: address(oracle),
@@ -425,7 +436,7 @@ contract TrancheMarketTest is Test {
         TrancheMarket.MarketParams memory params = TrancheMarket.MarketParams({
             ua: address(ua),
             poolFee: 500,
-            expiry: block.timestamp + MONTH,
+            matureAt: block.timestamp + MONTH,
             seniorRatio: 0.8e18,
             admin: admin,
             priceFeed: address(oracle),
@@ -476,7 +487,7 @@ contract TrancheMarketTest is Test {
         TrancheMarket.MarketParams memory params = TrancheMarket.MarketParams({
             ua: address(ua),
             poolFee: 500,
-            expiry: block.timestamp + MONTH,
+            matureAt: block.timestamp + MONTH,
             seniorRatio: 0.8e18,
             admin: admin,
             priceFeed: address(oracle),

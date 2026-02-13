@@ -94,7 +94,7 @@ abstract contract BaseForkTest is Test {
         TrancheMarket.MarketParams memory params = TrancheMarket.MarketParams({
             ua: address(prime),
             poolFee: POOL_FEE,
-            expiry: block.timestamp + MATURITY,
+            matureAt: block.timestamp + MATURITY,
             seniorRatio: SENIOR_RATIO,
             admin: admin,
             priceFeed: address(oracle),

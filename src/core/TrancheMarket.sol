@@ -32,7 +32,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     struct MarketParams {
         address ua;
         uint24 poolFee;
-        uint256 expiry;
+        uint256 matureAt;
         uint256 seniorRatio;
         address admin;
         address priceFeed;
@@ -58,7 +58,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     TrancheToken internal immutable _jrTokenContract;
 
     /// @notice Maturity timestamp
-    uint256 public immutable expiry;
+    uint256 public immutable matureAt;
 
     /// @notice Senior tranche ratio (e.g., 0.8e18 for 80%)
     uint256 public immutable seniorRatio;
@@ -140,13 +140,13 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     constructor(MarketParams memory params) {
         if (params.ua == address(0) || params.admin == address(0)) revert ZeroAddress();
         if (params.priceFeed == address(0)) revert ZeroAddress();
-        if (params.expiry <= block.timestamp) revert TrancheInvalidExpiry();
+        if (params.matureAt <= block.timestamp) revert TrancheInvalidMatureAt();
         if (params.seniorRatio == 0 || params.seniorRatio >= ONE) revert TrancheInvalidWeights();
         if (params.seniorFloor > params.seniorTarget) revert SettlementRatioModel.SettlementInvalidYieldRange();
 
         _uaToken = IERC20(params.ua);
         _poolFee = params.poolFee;
-        expiry = params.expiry;
+        matureAt = params.matureAt;
         seniorRatio = params.seniorRatio;
         juniorRatio = ONE - params.seniorRatio;
         admin = params.admin;
@@ -204,7 +204,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         nonReentrant
         returns (uint256 srOut, uint256 jrOut)
     {
-        if (block.timestamp >= expiry) revert TrancheMarketExpired();
+        if (finalized) revert TrancheMarketAlreadyFinalized();
         if (uaIn == 0) revert TrancheZeroAmount();
         if (receiver == address(0)) revert ZeroAddress();
 
@@ -232,7 +232,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         nonReentrant
         returns (uint256 uaOut)
     {
-        if (block.timestamp >= expiry) revert TrancheMarketExpired();
+        if (finalized) revert TrancheMarketAlreadyFinalized();
         if (srIn == 0 || jrIn == 0) revert TrancheZeroAmount();
         if (receiver == address(0)) revert ZeroAddress();
 
@@ -260,7 +260,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @param deviationThreshold Maximum allowed deviation from oracle price (1e18 precision, e.g., 0.01e18 = 1%)
      */
     function finalize(uint256 referencePrice, uint256 deviationThreshold) external override onlyAdmin nonReentrant {
-        if (block.timestamp < expiry) revert TrancheMarketNotExpired();
+        if (block.timestamp < matureAt) revert TrancheMarketNotMature();
         if (finalized) revert TrancheMarketAlreadyFinalized();
         if (deviationThreshold > 1e18) revert OracleInvalidDeviationThreshold();
         if (referencePrice == 0) revert SettlementRatioModel.SettlementZeroPrice();
@@ -355,7 +355,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      */
     function liquidate() external override onlyAdmin nonReentrant returns (uint256 _liquidatorReward) {
         if (!liquidationEnabled) revert LiquidationNotEnabled();
-        if (block.timestamp >= expiry) revert LiquidationAfterExpiry();
+        if (block.timestamp >= matureAt) revert LiquidationAfterMatureAt();
         if (finalized) revert TrancheMarketAlreadyFinalized();
 
         uint256 oraclePrice = _getOraclePrice();
@@ -439,7 +439,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     {
         liquidationPriceValue = liquidationPrice;
 
-        if (!liquidationEnabled || block.timestamp >= expiry || finalized) {
+        if (!liquidationEnabled || block.timestamp >= matureAt || finalized) {
             return (false, 0, liquidationPriceValue, 0, 0);
         }
 

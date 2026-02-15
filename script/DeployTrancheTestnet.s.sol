@@ -35,7 +35,6 @@ interface IPositionManager {
 }
 
 contract DeployTrancheRWATestnet is Script {
-    uint256 constant ONE = 1e18;
     uint256 constant MATURITY = 1 hours; // for test purpose
 
     uint256 constant SENIOR_RATIO = 0.725e18; // 72.5% Senior & 27.5% Junior

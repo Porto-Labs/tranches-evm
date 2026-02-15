@@ -114,7 +114,6 @@ contract Router is IRouter, IMorphoFlashLoanCallback {
         returns (uint256 srOut)
     {
         if (uaIn == 0) revert ZeroAmount();
-
         (address uaAddress, address srAddress,, uint24 poolFee) = ITrancheMarket(market).getSwapParameters();
 
         IERC20(uaAddress).safeTransferFrom(msg.sender, address(this), uaIn);

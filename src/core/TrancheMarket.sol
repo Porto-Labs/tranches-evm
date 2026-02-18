@@ -166,10 +166,9 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         liquidationReward = params.liquidationReward;
 
         if (params.liquidationEnabled) {
-            uint256 _juniorRatio = ONE - params.seniorRatio;
             liquidationPrice = fetchedPrice.mulWad(
                 params.seniorRatio.mulWad(ONE + params.seniorFloor)
-                    + _juniorRatio.mulWad(params.liquidationBuffer + params.liquidationReward)
+                    + juniorRatio.mulWad(params.liquidationBuffer + params.liquidationReward)
             );
         }
 
@@ -256,7 +255,7 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
      * @notice Finalize redemption rates at maturity using oracle price
      * @dev Admin provides reference price for deviation check, oracle price is fetched on-chain
      *      Contract calculates rates using SettlementRatioModel waterfall logic
-     * @param referencePrice Expected price for deviation validation (PROTOCOL_DEFAULT_DECIMALS precision)
+     * @param referencePrice Expected price for deviation validation (1e18 precision)
      * @param deviationThreshold Maximum allowed deviation from oracle price (1e18 precision, e.g., 0.01e18 = 1%)
      */
     function finalize(uint256 referencePrice, uint256 deviationThreshold) external override onlyAdmin nonReentrant {
@@ -544,3 +543,11 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         jrOut = uaIn.mulWad(juniorRatio);
     }
 }
+
+/*
+ [] In finalzie, do we want to store the oracle price in storage variable, finalPrice = oraclePrice
+Currently ther is no information what wha tprcie we finalzie the tranche, it is only emit as a event
+ [] if finalzied, what we do with preveiewSettlement()?
+ [] do we want preveiwTranche, was added at first verison of Router when we use Uniswap pool for flashloan. When we
+mvoe to Morpho this function is not used anymore/ Only in 1 test is used
+*/

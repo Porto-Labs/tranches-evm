@@ -337,12 +337,12 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
 
     /**
      * @notice Change the admin address
-     * @param _newAdmin The new admin address
+     * @param newAdmin The new admin address
      */
-    function setAdmin(address _newAdmin) external override onlyAdmin {
-        if (_newAdmin == address(0)) revert ZeroAddress();
-        admin = _newAdmin;
-        emit AdminChanged(_newAdmin);
+    function setAdmin(address newAdmin) external override onlyAdmin {
+        if (newAdmin == address(0)) revert ZeroAddress();
+        admin = newAdmin;
+        emit AdminChanged(newAdmin);
     }
 
     // ============ Liquidation ============
@@ -461,21 +461,21 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
     /**
      * @notice Scale price from oracle decimals to target decimals
      * @dev Uses Chainlink's recommended pattern for decimal conversion
-     * @param _price Raw price from oracle
-     * @param _priceDecimals Oracle's decimal precision
-     * @param _targetDecimals Target decimal precision (PROTOCOL_DEFAULT_DECIMALS = 18)
+     * @param price Raw price from oracle
+     * @param priceDecimals Oracle's decimal precision
+     * @param targetDecimals Target decimal precision (PROTOCOL_DEFAULT_DECIMALS = 18)
      * @return Scaled price in target decimals
      */
-    function _scalePrice(int256 _price, uint8 _priceDecimals, uint8 _targetDecimals) internal pure returns (uint256) {
-        if (_priceDecimals < _targetDecimals) {
+    function _scalePrice(int256 price, uint8 priceDecimals, uint8 targetDecimals) internal pure returns (uint256) {
+        if (priceDecimals < targetDecimals) {
             // forge-lint: disable-next-line(unsafe-typecast)
-            return uint256(_price) * 10 ** uint256(_targetDecimals - _priceDecimals);
-        } else if (_priceDecimals > _targetDecimals) {
+            return uint256(price) * 10 ** uint256(targetDecimals - priceDecimals);
+        } else if (priceDecimals > targetDecimals) {
             // forge-lint: disable-next-line(unsafe-typecast)
-            return uint256(_price) / 10 ** uint256(_priceDecimals - _targetDecimals);
+            return uint256(price) / 10 ** uint256(priceDecimals - targetDecimals);
         }
         // forge-lint: disable-next-line(unsafe-typecast)
-        return uint256(_price);
+        return uint256(price);
     }
 
     /**

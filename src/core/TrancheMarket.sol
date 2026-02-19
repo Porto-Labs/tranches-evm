@@ -333,18 +333,6 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         emit RedeemJunior(msg.sender, receiver, jrIn, uaOut);
     }
 
-    // ============ Admin Functions ============
-
-    /**
-     * @notice Change the admin address
-     * @param newAdmin The new admin address
-     */
-    function setAdmin(address newAdmin) external override onlyAdmin {
-        if (newAdmin == address(0)) revert ZeroAddress();
-        admin = newAdmin;
-        emit AdminChanged(newAdmin);
-    }
-
     // ============ Liquidation ============
 
     /**
@@ -456,7 +444,37 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         }
     }
 
+    // ============ Admin Functions ============
+
+    /**
+     * @notice Change the admin address
+     * @param newAdmin The new admin address
+     */
+    function setAdmin(address newAdmin) external override onlyAdmin {
+        if (newAdmin == address(0)) revert ZeroAddress();
+        admin = newAdmin;
+        emit AdminChanged(newAdmin);
+    }
+
     // ============ Internal Functions ============
+
+    /**
+     * @notice Fetch and validate oracle price
+     * @dev Validates: price > 0, data not stale (24h threshold)
+     * @return price Oracle price scaled to 1e18 precision
+     */
+    function _getOraclePrice() internal view returns (uint256 price) {
+        (, int256 answer,, uint256 updatedAt,) = _priceFeed.latestRoundData();
+
+        // Validate price is positive
+        if (answer <= 0) revert OracleInvalidPrice();
+
+        // Validate data is not stale
+        if (block.timestamp - updatedAt > STALENESS_THRESHOLD) revert OracleStalePrice();
+
+        // Scale to 1e18 precision
+        price = _scalePrice(answer, _priceFeedDecimals, PROTOCOL_DEFAULT_DECIMALS);
+    }
 
     /**
      * @notice Scale price from oracle decimals to target decimals
@@ -476,24 +494,6 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         }
         // forge-lint: disable-next-line(unsafe-typecast)
         return uint256(price);
-    }
-
-    /**
-     * @notice Fetch and validate oracle price
-     * @dev Validates: price > 0, data not stale (24h threshold)
-     * @return price Oracle price scaled to 1e18 precision
-     */
-    function _getOraclePrice() internal view returns (uint256 price) {
-        (, int256 answer,, uint256 updatedAt,) = _priceFeed.latestRoundData();
-
-        // Validate price is positive
-        if (answer <= 0) revert OracleInvalidPrice();
-
-        // Validate data is not stale
-        if (block.timestamp - updatedAt > STALENESS_THRESHOLD) revert OracleStalePrice();
-
-        // Scale to 1e18 precision
-        price = _scalePrice(answer, _priceFeedDecimals, PROTOCOL_DEFAULT_DECIMALS);
     }
 
     // ============ View Functions ============
@@ -543,11 +543,3 @@ contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
         jrOut = uaIn.mulWad(juniorRatio);
     }
 }
-
-/*
- [] In finalzie, do we want to store the oracle price in storage variable, finalPrice = oraclePrice
-Currently ther is no information what wha tprcie we finalzie the tranche, it is only emit as a event
- [] if finalzied, what we do with preveiewSettlement()?
- [] do we want preveiwTranche, was added at first verison of Router when we use Uniswap pool for flashloan. When we
-mvoe to Morpho this function is not used anymore/ Only in 1 test is used
-*/

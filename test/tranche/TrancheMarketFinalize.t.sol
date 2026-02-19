@@ -606,4 +606,69 @@ contract TrancheMarketFinalizeTest is Test {
         uint256 jrLossRatio = (jrPrincipalUsd - jrUsdPayout) * 1e18 / jrPrincipalUsd;
         assertApproxEqRel(jrLossRatio, 0.5055e18, 0.001e18); // Junior Loss: ~50.55%
     }
+
+
+    function test_Finalize_Ua6_100InitPrice_CompressionScenario() public {
+        ERC20Mock6Decimals _ua = new ERC20Mock6Decimals("Underlying Asset", "UA");
+        MockChainlinkAggregator _oracle = new MockChainlinkAggregator(18, "UA / USD");
+        _oracle.setRoundData(int256(100e18), block.timestamp);
+
+        TrancheMarket.MarketParams memory params = TrancheMarket.MarketParams({
+            ua: address(_ua),
+            poolFee: 500,
+            matureAt: block.timestamp + MONTH,
+            seniorRatio: 0.725e18,
+            admin: admin,
+            priceFeed: address(_oracle),
+            seniorFloor: 0.04e18,
+            seniorTarget: 0.06e18,
+            liquidationEnabled: false,
+            liquidationBuffer: 0,
+            liquidationReward: 0
+        });
+        TrancheMarket _market = new TrancheMarket(params);
+
+        // ($100/token), pool = $10M
+        // totalUa = 100_000e6 (100k tokens × $100)
+        uint256 totalUa = 100_000e6; // $10,000,000
+        _ua.mint(user, totalUa);
+        vm.startPrank(user);
+        _ua.approve(address(_market), totalUa);
+        _market.tranche(totalUa, user);
+        vm.stopPrank();
+
+        uint256 maturityPrice = 103e18; // Price up 3%
+        vm.warp(block.timestamp + MONTH + 1);
+        _oracle.setRoundData(int256(maturityPrice), block.timestamp);
+
+        vm.prank(admin);
+        _market.finalize(maturityPrice, 0.01e18);
+
+        SettlementRatioModelMock model = new SettlementRatioModelMock();
+
+        (uint256 srPrincipalUsd, uint256 jrPrincipalUsd) =
+            model.calculatePrincipals(totalUa, _market.initialPrice(), _market.seniorRatio());
+
+        (uint256 srFloorUsd, uint256 srTargetUsd) =
+            model.calculateThresholds(srPrincipalUsd, _market.seniorFloor(), _market.seniorTarget());
+
+        uint256 totalValueUsd = totalUa * maturityPrice / 1e18;
+        (uint256 srUsdPayout, uint256 jrUsdPayout) =
+            model.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
+
+        // Condition B (Target APY Compression): senior capped at floor, junior earns residual
+        // Senior earns $290,000 = exactly 4% floor yield
+        assertEq(srUsdPayout, 7_540_000e6);
+        assertEq(srUsdPayout - srPrincipalUsd, 290_000e6);
+
+        uint256 srApy = (srUsdPayout - srPrincipalUsd) * 1e18 / srPrincipalUsd;
+        assertEq(srApy, 0.04e18);
+
+        // Junior earns residual: $10,000 = ~0.3636% APY
+        assertEq(jrUsdPayout, 2_760_000e6);
+        assertEq(jrUsdPayout - jrPrincipalUsd, 10_000e6);
+
+        uint256 jrApy = (jrUsdPayout - jrPrincipalUsd) * 1e18 / jrPrincipalUsd;
+        assertApproxEqRel(jrApy, 0.003636e18, 0.001e18); // Junior Yield: ~0.3636%
+    }
 }

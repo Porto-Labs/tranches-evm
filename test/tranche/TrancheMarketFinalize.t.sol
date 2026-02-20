@@ -290,14 +290,14 @@ contract TrancheMarketFinalizeTest is Test {
         uint256 totalValueUsd = totalUa * maturityPrice / 1e18;
         (uint256 srUsdPayout, uint256 jrUsdPayout) = model.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
 
-        assertApproxEqRel(srUsdPayout, 7_685_000e6, 0.001e18);
-        assertApproxEqRel(jrUsdPayout, 2_965_000e6, 0.001e18);
+        assertEq(srUsdPayout, 7_685_000e6);
+        assertEq(jrUsdPayout, 2_965_000e6);
 
         // Required for 6% target: $435,000 = 435000e6
-        assertApproxEqRel(srUsdPayout - srPrincipalUsd, 435_000e6, 0.001e18);
+        assertEq(srUsdPayout - srPrincipalUsd, 435_000e6);
 
         // Residual Income: $215,000 = 215000e6
-        assertApproxEqRel(jrUsdPayout - jrPrincipalUsd, 215_000e6, 0.001e18);
+        assertEq(jrUsdPayout - jrPrincipalUsd, 215_000e6);
 
         uint256 jrApy = (jrUsdPayout - jrPrincipalUsd) * 1e18 / jrPrincipalUsd;
         assertApproxEqRel(jrApy, 0.0782e18, 0.001e18); // Junior Yield: ~7.82%
@@ -410,14 +410,14 @@ contract TrancheMarketFinalizeTest is Test {
         (uint256 srUsdPayout, uint256 jrUsdPayout) =
             model.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
 
-        assertApproxEqRel(srUsdPayout, 7_685_000e8, 0.001e18);
-        assertApproxEqRel(jrUsdPayout, 3_165_000e8, 0.001e18);
+        assertEq(srUsdPayout, 7_685_000e8);
+        assertEq(jrUsdPayout, 3_165_000e8);
 
         // Required for 6% target: $435,000 = 435_000e8
-        assertApproxEqRel(srUsdPayout - srPrincipalUsd, 435_000e8, 0.001e18);
+        assertEq(srUsdPayout - srPrincipalUsd, 435_000e8);
 
         // Residual Income: $415,000 = 415_000e8
-        assertApproxEqRel(jrUsdPayout - jrPrincipalUsd, 415_000e8, 0.001e18);
+        assertEq(jrUsdPayout - jrPrincipalUsd, 415_000e8);
 
         uint256 jrApy = (jrUsdPayout - jrPrincipalUsd) * 1e18 / jrPrincipalUsd;
         assertApproxEqRel(jrApy, 0.1509e18, 0.001e18); // Junior Yield: ~15.09%
@@ -471,14 +471,14 @@ contract TrancheMarketFinalizeTest is Test {
         (uint256 srUsdPayout, uint256 jrUsdPayout) =
             model.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
 
-        assertApproxEqRel(srUsdPayout, 7_685_000e18, 0.001e18);
-        assertApproxEqRel(jrUsdPayout, 3_265_000e18, 0.001e18);
+        assertEq(srUsdPayout, 7_685_000e18);
+        assertEq(jrUsdPayout, 3_265_000e18);
 
         // Required for 6% target: $435,000 = 435_000e18
-        assertApproxEqRel(srUsdPayout - srPrincipalUsd, 435_000e18, 0.001e18);
+        assertEq(srUsdPayout - srPrincipalUsd, 435_000e18);
 
         // Residual Income: $515,000 = 515_000e18
-        assertApproxEqRel(jrUsdPayout - jrPrincipalUsd, 515_000e18, 0.001e18);
+        assertEq(jrUsdPayout - jrPrincipalUsd, 515_000e18);
 
         uint256 jrApy = (jrUsdPayout - jrPrincipalUsd) * 1e18 / jrPrincipalUsd;
         assertApproxEqRel(jrApy, 0.1873e18, 0.001e18); // Junior Yield: ~18.73%

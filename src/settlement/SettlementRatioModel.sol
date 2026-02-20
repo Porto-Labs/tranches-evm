@@ -145,8 +145,8 @@ library SettlementRatioModel {
             juniorPayout = totalValueUsd - srTargetUsd;
             // Condition B: Target APY Compression
         } else if (totalValueUsd >= srFloorUsd + jrPrincipalUsd) {
-            seniorPayout = totalValueUsd - jrPrincipalUsd;
-            juniorPayout = jrPrincipalUsd;
+            seniorPayout = srFloorUsd;
+            juniorPayout = totalValueUsd - srFloorUsd;
             // Condition C: Junior Erosion
         } else {
             seniorPayout = FixedPointMathLib.min(totalValueUsd, srFloorUsd);

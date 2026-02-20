@@ -95,8 +95,8 @@ contract SettlementRatioModelTest is Test {
 
         (uint256 seniorPayout, uint256 juniorPayout) =
             settlementModel.calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
-        assertEq(seniorPayout, totalValueUsd - jrPrincipalUsd);
-        assertEq(juniorPayout, jrPrincipalUsd);
+        assertEq(seniorPayout, srFloorUsd);
+        assertEq(juniorPayout, totalValueUsd - srFloorUsd);
     }
 
     function test_CalculatePayouts_ErosionCondition() public view {

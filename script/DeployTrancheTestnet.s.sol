@@ -91,7 +91,6 @@ contract DeployTrancheRWATestnet is Script {
 
         oracle = new MockChainlinkAggregator(8, "PRIME / USD");
 
-        // TODO: verify if it works correctly with price in decimal > 8.
         int256 price8Decimals = int256(INITIAL_PRICE / 1e10); // currentPrice = 1.02e8
         oracle.setRoundData(price8Decimals, block.timestamp);
 

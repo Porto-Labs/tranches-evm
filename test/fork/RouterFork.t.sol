@@ -2,12 +2,10 @@
 pragma solidity ^0.8.28;
 
 import { BaseForkTest } from "./BaseForkTest.sol";
-import { TrancheToken } from "src/core/TrancheToken.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IUniswapV3Pool } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { IRouter } from "src/interfaces/IRouter.sol";
-import { console, Vm } from "forge-std/Test.sol";
+import { Vm } from "forge-std/Test.sol";
 import { IQuoterV2 } from "@uniswap/v3-periphery/contracts/interfaces/IQuoterV2.sol";
 
 contract RouterFork is BaseForkTest {
@@ -202,24 +200,7 @@ contract RouterFork is BaseForkTest {
 
         address srToken = market.srToken();
 
-        uint256 srNeededOffChain = (jrIn * SENIOR_RATIO + JUNIOR_RATIO - 1) / JUNIOR_RATIO;
         uint256 srNeededRouter = router.calculateSeniorNeeded(jrIn, address(market));
-
-        console.log("=== SR NEEDED CALCULATION ===");
-        console.log("jrIn:", jrIn);
-        console.log("SENIOR_RATIO:", SENIOR_RATIO);
-        console.log("JUNIOR_RATIO:", JUNIOR_RATIO);
-        console.log("srNeeded (off-chain):", srNeededOffChain);
-        console.log("srNeeded (router):", srNeededRouter);
-
-        console.log("");
-        console.log("=== RECOMBINE RATIO CHECK PREVIEW ===");
-        uint256 lhs = (srNeededRouter * JUNIOR_RATIO) / 1e18;
-        uint256 rhs = (jrIn * SENIOR_RATIO) / 1e18;
-        console.log("srIn * juniorRatio / 1e18:", lhs);
-        console.log("jrIn * seniorRatio / 1e18:", rhs);
-        console.log("Difference (should be 0):", rhs > lhs ? rhs - lhs : lhs - rhs);
-        console.log("Will recombine pass?:", lhs == rhs ? "YES" : "NO");
 
         IQuoterV2 quoter = IQuoterV2(UNISWAP_V3_QUOTER_V2_SEPOLIA);
         (uint256 uaNeeded,,,) = quoter.quoteExactOutputSingle(
@@ -258,7 +239,6 @@ contract RouterFork is BaseForkTest {
     // +-----------+---------+---------+----------+
     function test_BuyJunior_Success() public {
         address jrToken = market.jrToken();
-        address uaToken = market.uaToken();
 
         address buyUser = makeAddr("buyJuniorUser");
         uint256 buyAmount = 100_000e18; // uaIn
@@ -271,10 +251,6 @@ contract RouterFork is BaseForkTest {
         uint256 userSlippage = 9800; // 2%
         (uint256 uaToBorrow, uint256 minJrOut) = _calculateFromUaInput(buyAmount, userSlippage);
 
-        console.log("=== OFF-CHAIN CALCULATION ===");
-        console.log("minJrOut (with 2% slippage):", minJrOut / 1e18);
-        console.log("uaToBorrow:", uaToBorrow / 1e18);
-
         uint256 userJrBefore = IERC20(jrToken).balanceOf(buyUser);
 
         vm.startPrank(buyUser);
@@ -283,12 +259,6 @@ contract RouterFork is BaseForkTest {
         vm.stopPrank();
 
         uint256 userJrAfter = IERC20(jrToken).balanceOf(buyUser);
-        uint256 userUaAfter = IERC20(uaToken).balanceOf(buyUser);
-
-        console.log("=== CHANGES ===");
-        console.log("UA input:", buyAmount / 1e18);
-        console.log("jrPRIME received:", (userJrAfter - userJrBefore) / 1e18);
-        console.log("Dust UA received:", userUaAfter / 1e18);
 
         assertGt(userJrAfter - userJrBefore, 0);
     }
@@ -317,7 +287,6 @@ contract RouterFork is BaseForkTest {
     function test_SwapSeniorToJunior_Success() public {
         address jrToken = market.jrToken();
         address srToken = market.srToken();
-        address uaToken = market.uaToken();
         uint256 swapAmount = 1000e18;
 
         _adjustPoolPriceBySellingSr(600_000e18);
@@ -325,13 +294,8 @@ contract RouterFork is BaseForkTest {
         uint256 userSlippage = 9800;
         (uint256 uaToBorrow, uint256 minJrOut) = _calculateFromSrInput(swapAmount, userSlippage);
 
-        console.log("=== OFF-CHAIN CALCULATION ===");
-        console.log("minJrOut (with 1.5% slippage):", minJrOut / 1e18);
-        console.log("uaToBorrow:", uaToBorrow / 1e18);
-
         uint256 userJrBefore = IERC20(jrToken).balanceOf(user3);
         uint256 userSrBefore = IERC20(srToken).balanceOf(user3);
-        uint256 userUaBefore = IERC20(uaToken).balanceOf(user3);
 
         vm.startPrank(user3);
         IERC20(srToken).approve(address(router), swapAmount);
@@ -340,12 +304,6 @@ contract RouterFork is BaseForkTest {
 
         uint256 userJrAfter = IERC20(jrToken).balanceOf(user3);
         uint256 userSrAfter = IERC20(srToken).balanceOf(user3);
-        uint256 userUaAfter = IERC20(uaToken).balanceOf(user3);
-
-        console.log("=== CHANGES ===");
-        console.log("srPRIME swapped:", (userSrBefore - userSrAfter) / 1e18);
-        console.log("jrPRIME received:", (userJrAfter - userJrBefore) / 1e18);
-        console.log("Dust UA received:", (userUaAfter - userUaBefore) / 1e18);
 
         assertEq(userSrBefore - userSrAfter, swapAmount);
         assertGt(userJrAfter - userJrBefore, 0);
@@ -531,10 +489,6 @@ contract RouterFork is BaseForkTest {
         uint256 userSlippage = 9800; // 2%
         (uint256 uaToBorrow, uint256 minUaOut) = _calculateFromJrInput(sellAmount, userSlippage);
 
-        console.log("=== OFF-CHAIN CALCULATION ===");
-        console.log("minUaOut (with 2% slippage):", minUaOut / 1e18);
-        console.log("uaToBorrow:", uaToBorrow / 1e18);
-
         uint256 userJrBefore = IERC20(jrToken).balanceOf(user1);
         uint256 userUaBefore = IERC20(uaToken).balanceOf(user1);
 
@@ -545,10 +499,6 @@ contract RouterFork is BaseForkTest {
 
         uint256 userJrAfter = IERC20(jrToken).balanceOf(user1);
         uint256 userUaAfter = IERC20(uaToken).balanceOf(user1);
-
-        console.log("=== CHANGES ===");
-        console.log("jrPRIME sold:", (userJrBefore - userJrAfter) / 1e18);
-        console.log("UA received:", (userUaAfter - userUaBefore) / 1e18);
 
         assertEq(userJrBefore - userJrAfter, sellAmount);
         assertGt(userUaAfter - userUaBefore, 0);

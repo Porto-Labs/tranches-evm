@@ -245,7 +245,7 @@ contract TrancheMarketFinalizeTest is Test {
         market.previewSettlement();
     }
 
-    function test_Finalize_Ua6_SurplusScenario() public {
+    function test_Finalize_SurplusScenario_LowYield() public {
         ERC20Mock6Decimals _ua = new ERC20Mock6Decimals("Underlying Asset", "UA");
         MockChainlinkAggregator _oracle = new MockChainlinkAggregator(18, "UA / USD");
         _oracle.setRoundData(int256(1e18), block.timestamp);
@@ -303,7 +303,7 @@ contract TrancheMarketFinalizeTest is Test {
         assertApproxEqRel(jrApy, 0.0782e18, 0.001e18); // Junior Yield: ~7.82%
     }
 
-    function test_Finalize_Ua8_SurplusScenario() public {
+    function test_Finalize_SurplusScenario_ModerateYield() public {
         ERC20Mock8Decimals _ua = new ERC20Mock8Decimals("Underlying Asset", "UA");
         MockChainlinkAggregator _oracle = new MockChainlinkAggregator(18, "UA / USD");
         _oracle.setRoundData(int256(1e18), block.timestamp);
@@ -362,7 +362,7 @@ contract TrancheMarketFinalizeTest is Test {
         assertApproxEqRel(jrApy, 0.1145e18, 0.001e18); // Junior Yield: ~11.45%
     }
 
-    function test_Finalize_Ua8_100InitPrice_SurplusScenario() public {
+    function test_Finalize_SurplusScenario_MidYield() public {
         ERC20Mock8Decimals _ua = new ERC20Mock8Decimals("Underlying Asset", "UA");
         MockChainlinkAggregator _oracle = new MockChainlinkAggregator(18, "UA / USD");
         _oracle.setRoundData(int256(100e18), block.timestamp);
@@ -423,7 +423,7 @@ contract TrancheMarketFinalizeTest is Test {
         assertApproxEqRel(jrApy, 0.1509e18, 0.001e18); // Junior Yield: ~15.09%
     }
 
-    function test_Finalize_Ua18_10kInitPrice_SurplusScenario() public {
+    function test_Finalize_SurplusScenario_HighYield() public {
         ERC20Mock _ua = new ERC20Mock("Underlying Asset", "UA");
         MockChainlinkAggregator _oracle = new MockChainlinkAggregator(18, "UA / USD");
         _oracle.setRoundData(int256(10_000e18), block.timestamp);
@@ -484,7 +484,7 @@ contract TrancheMarketFinalizeTest is Test {
         assertApproxEqRel(jrApy, 0.1873e18, 0.001e18); // Junior Yield: ~18.73%
     }
 
-    function test_Finalize_Ua8_8dOracle_1kInitPrice_SurplusScenario() public {
+    function test_Finalize_SurplusScenario_VeryHighYield() public {
         ERC20Mock8Decimals _ua = new ERC20Mock8Decimals("Underlying Asset", "UA");
         MockChainlinkAggregator _oracle = new MockChainlinkAggregator(8, "UA / USD");
         _oracle.setRoundData(int256(1_000e8), block.timestamp);
@@ -545,7 +545,7 @@ contract TrancheMarketFinalizeTest is Test {
         assertApproxEqRel(jrApy, 0.2236e18, 0.001e18); // Junior Yield: ~22.36%
     }
 
-    function test_Finalize_Ua8_8dOracle_ErosionScenario() public {
+    function test_Finalize_ErosionScenario() public {
         ERC20Mock8Decimals _ua = new ERC20Mock8Decimals("Underlying Asset", "UA");
         MockChainlinkAggregator _oracle = new MockChainlinkAggregator(8, "UA / USD");
         _oracle.setRoundData(int256(10e8), block.timestamp);

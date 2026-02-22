@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -19,7 +19,7 @@ import { SettlementRatioModel } from "../settlement/SettlementRatioModel.sol";
  *      At maturity: Admin sets redemption rates
  *      Post-maturity: Unilateral redemption at fixed rates
  */
-contract TrancheMarket is ITrancheMarket, ReentrancyGuard {
+contract TrancheMarket is ITrancheMarket, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
     using FixedPointMathLib for uint256;
 

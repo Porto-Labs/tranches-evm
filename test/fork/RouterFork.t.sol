@@ -329,10 +329,10 @@ contract RouterFork is BaseForkTest {
         router.buyJunior(address(market), buyAmount, uaToBorrow, minJrOut, block.timestamp + 1 minutes);
         vm.stopPrank();
 
-        // BuyJunior is emitted in the callback; Morpho Approval + Transfer follow after repayment
+        // BuyJunior is emitted in the callback; Morpho Transfer (repayment) follows after
         Vm.Log[] memory logs = vm.getRecordedLogs();
         (uint256 uaIn, uint256 jrOut, uint256 uaDust) =
-            abi.decode(logs[logs.length - 3].data, (uint256, uint256, uint256));
+            abi.decode(logs[logs.length - 2].data, (uint256, uint256, uint256));
 
         assertEq(uaIn, buyAmount);
         assertApproxEqAbs(jrOut, 94_131e18, 1e18);
@@ -362,10 +362,10 @@ contract RouterFork is BaseForkTest {
         router.swapSeniorToJunior(address(market), swapAmount, uaToBorrow, minJrOut, block.timestamp + 1 minutes);
         vm.stopPrank();
 
-        // SwapSeniorToJunior is emitted in the callback; Morpho Approval + Transfer follow after repayment
+        // SwapSeniorToJunior is emitted in the callback; Morpho Transfer (repayment) follows after
         Vm.Log[] memory logs = vm.getRecordedLogs();
         (uint256 srIn, uint256 jrOut, uint256 uaDust) =
-            abi.decode(logs[logs.length - 3].data, (uint256, uint256, uint256));
+            abi.decode(logs[logs.length - 2].data, (uint256, uint256, uint256));
 
         assertEq(srIn, swapAmount);
         assertApproxEqAbs(jrOut, 91_427e18, 1e18);

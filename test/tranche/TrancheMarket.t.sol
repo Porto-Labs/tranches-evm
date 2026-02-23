@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Test } from "forge-std/Test.sol";
 import { TrancheMarket } from "src/core/TrancheMarket.sol";
 import { TrancheToken } from "src/core/TrancheToken.sol";
-import { ERC20Mock } from "../mocks/ERC20Mock.sol";
+import { ERC20Mock, ERC20Mock6Decimals, ERC20Mock8Decimals } from "../mocks/ERC20Mock.sol";
 import { MockChainlinkAggregator } from "../mocks/MockChainlinkAggregator.sol";
 import { ITrancheMarket } from "src/interfaces/ITrancheMarket.sol";
 import { SettlementRatioModel } from "src/settlement/SettlementRatioModel.sol";
@@ -541,5 +541,126 @@ contract TrancheMarketTest is Test {
         market.finalize(1e18, 0.02e18);
 
         assertTrue(market.finalized());
+    }
+
+    // ============ Tranche & Recombine With Non-18-Decimal Tokens ============
+
+    function test_Tranche_6DecimalToken() public {
+        ERC20Mock6Decimals ua6 = new ERC20Mock6Decimals("Tranche6", "T6");
+        MockChainlinkAggregator oracle6 = new MockChainlinkAggregator(8, "USDC / USD");
+        oracle6.setRoundData(100_000_000, block.timestamp);
+
+        TrancheMarket.MarketParams memory params = _defaultMarketParams();
+        params.ua = address(ua6);
+        params.priceFeed = address(oracle6);
+        TrancheMarket market6 = new TrancheMarket(params);
+
+        ua6.mint(user, 50e6); // $50
+        vm.startPrank(user);
+        ua6.approve(address(market6), 50e6);
+        (uint256 srOut, uint256 jrOut) = market6.tranche(50e6, user);
+        vm.stopPrank();
+
+        assertEq(srOut, 35e6);
+        assertEq(jrOut, 15e6);
+        assertEq(TrancheToken(market6.srToken()).balanceOf(user), 35e6);
+        assertEq(TrancheToken(market6.jrToken()).balanceOf(user), 15e6);
+        assertEq(ua6.balanceOf(user), 0);
+    }
+
+    function test_Tranche_8DecimalToken() public {
+        ERC20Mock8Decimals ua8 = new ERC20Mock8Decimals("Tranche8", "T8");
+        MockChainlinkAggregator oracle8 = new MockChainlinkAggregator(8, "WBTC / USD");
+        oracle8.setRoundData(100_000_000, block.timestamp);
+
+        TrancheMarket.MarketParams memory params = _defaultMarketParams();
+        params.ua = address(ua8);
+        params.priceFeed = address(oracle8);
+        TrancheMarket market8 = new TrancheMarket(params);
+
+        ua8.mint(user, 2e8);
+        vm.startPrank(user);
+        ua8.approve(address(market8), 2e8);
+        (uint256 srOut, uint256 jrOut) = market8.tranche(2e8, user);
+        vm.stopPrank();
+
+        // 200_000_000 * 0.7e18 / 1e18 = 200_000_000 * 0.7 = 140_000_000 -> 1.4 tokens (70%)
+        assertEq(srOut, 140_000_000);
+        // 200_000_000 * 0.3e18 / 1e18 = 200_000_000 * 0.3 =  60_000_000 -> 0.6 tokens (30%)
+        assertEq(jrOut, 60_000_000);
+
+        assertEq(TrancheToken(market8.srToken()).balanceOf(user), 140_000_000);
+        assertEq(TrancheToken(market8.jrToken()).balanceOf(user), 60_000_000);
+        assertEq(ua8.balanceOf(user), 0);
+    }
+
+    function test_Recombine_6DecimalToken() public {
+        ERC20Mock6Decimals ua6 = new ERC20Mock6Decimals("Tranche6", "T6");
+        MockChainlinkAggregator oracle6 = new MockChainlinkAggregator(8, "T6 / USD");
+        oracle6.setRoundData(100_000_000, block.timestamp);
+
+        TrancheMarket.MarketParams memory params = _defaultMarketParams();
+        params.ua = address(ua6);
+        params.priceFeed = address(oracle6);
+        TrancheMarket market6 = new TrancheMarket(params);
+
+        ua6.mint(user, 50e6);
+        vm.startPrank(user);
+        ua6.approve(address(market6), 50e6);
+        market6.tranche(50e6, user);
+        uint256 uaOut = market6.recombine(35e6, 15e6, user);
+        vm.stopPrank();
+
+        assertEq(uaOut, 50e6);
+        assertEq(ua6.balanceOf(user), 50e6);
+        assertEq(TrancheToken(market6.srToken()).balanceOf(user), 0);
+        assertEq(TrancheToken(market6.jrToken()).balanceOf(user), 0);
+    }
+
+    function test_Recombine_8DecimalToken() public {
+        ERC20Mock8Decimals ua8 = new ERC20Mock8Decimals("Tranche8", "T8");
+        MockChainlinkAggregator oracle8 = new MockChainlinkAggregator(8, "T8 / USD");
+        oracle8.setRoundData(100_000_000, block.timestamp);
+
+        TrancheMarket.MarketParams memory params = _defaultMarketParams();
+        params.ua = address(ua8);
+        params.priceFeed = address(oracle8);
+        TrancheMarket market8 = new TrancheMarket(params);
+
+        ua8.mint(user, 2e8);
+        vm.startPrank(user);
+        ua8.approve(address(market8), 2e8);
+        market8.tranche(2e8, user);
+        uint256 uaOut = market8.recombine(140_000_000, 60_000_000, user);
+        vm.stopPrank();
+
+        assertEq(uaOut, 2e8);
+        assertEq(ua8.balanceOf(user), 2e8);
+        assertEq(TrancheToken(market8.srToken()).balanceOf(user), 0);
+        assertEq(TrancheToken(market8.jrToken()).balanceOf(user), 0);
+    }
+
+    function test_Tranche_FractionalAmount() public {
+        ERC20Mock6Decimals ua6 = new ERC20Mock6Decimals("Tranche6", "T6");
+        MockChainlinkAggregator oracle6 = new MockChainlinkAggregator(8, "T6 / USD");
+        oracle6.setRoundData(100_000_000, block.timestamp);
+
+        TrancheMarket.MarketParams memory params = _defaultMarketParams();
+        params.ua = address(ua6);
+        params.priceFeed = address(oracle6);
+        TrancheMarket market6 = new TrancheMarket(params);
+
+        uint256 uaIn = 50_500_000; // 50.50 USD
+        ua6.mint(user, uaIn);
+        vm.startPrank(user);
+        ua6.approve(address(market6), uaIn);
+        (uint256 srOut, uint256 jrOut) = market6.tranche(uaIn, user);
+        vm.stopPrank();
+
+        assertEq(srOut, 35_350_000); // 35.35 USD (70%)
+        assertEq(jrOut, 15_150_000); // 15.15 USD (30%)
+        assertEq(TrancheToken(market6.srToken()).balanceOf(user), 35_350_000);
+        assertEq(TrancheToken(market6.jrToken()).balanceOf(user), 15_150_000);
+        assertEq(ua6.balanceOf(user), 0);
     }
 }

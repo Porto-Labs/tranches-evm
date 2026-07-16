@@ -7,8 +7,7 @@
 - Always keep PROGRESS.md up-to-date as the bootstrap entrypoint for context
 - Check and edit PROGRESS.md before and after completing a milestone or task
 - Only track meaningful features in PROGRESS.md (not bugfixes, refactorings, or cleanup)
-- We use 1e18 decimal precision within the project. If an external integration returns different precision it should be converted straight away to 1e18 precision.
-- Do not use WAD terminology
+- We use 1e18 decimal precision within the project. If an external integration returns different precision it should be normalised straight away to 1e18 precision before this value being consumbed by the protocol.
 - Do not add in-line comments. Code should be self explanatory. Code + natspec + intuitive variable naming should be enough for clean code.
 
 ---
@@ -54,6 +53,37 @@ test/
 ├── Invariants/
 │   └── BaseInvariant.t.sol
 └── mocks/
+```
+
+### Mock Contracts
+
+Only create mock contracts in `test/mocks/` when you need to:
+- **Modify state** that is otherwise inaccessible (e.g., expose setters for internal variables)
+- **Simulate external dependencies** (e.g., mock oracles, mock ERC20 tokens)
+- **Control return values** for edge case testing
+
+Do NOT create mocks for:
+- **Stateless libraries** - use `using Library for Type` directly in test contracts
+- **Pure/view functions** - test them through contracts that use them or via direct library usage
+
+```solidity
+// GOOD: Test stateless library directly
+contract PortoMathTest is Test {
+    using PortoMath for uint256;
+
+    function test_MulDown() public pure {
+        assertEq(uint256(2e18).mulDown(3e18), 6e18);
+    }
+}
+
+// GOOD: Mock for stateful contract with inaccessible state
+contract MockChainlinkAggregator {
+    int256 private _price;
+
+    function setPrice(int256 price) external {
+        _price = price;
+    }
+}
 ```
 
 ### Test Type Decision Tree

@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-// No imports needed - using address types for maximum simplicity
-
 /**
  * @title ITrancheMarket
- * @notice Interface for the Porto Tranching mechanism (UA → srUA + jrUA) - V1
+ * @notice Interface for the Porto Tranching mechanism (UA = srUA + jrUA) - V1
  * @dev Defines the complete lifecycle: tokenize, redeem pre-maturity, finalize (admin-controlled), redeem post-maturity
+ * and liquidation
  */
 interface ITrancheMarket {
     // ============ Events ============
@@ -86,6 +85,62 @@ interface ITrancheMarket {
         address indexed triggeredBy
     );
 
+    // ============ Errors ============
+
+    /// @notice Thrown when attempting to finalize or redeem post-maturity before maturity
+    error TrancheMarketNotMature();
+
+    /// @notice Thrown when attempting post-maturity redemption before finalize() is called
+    error TrancheMarketNotFinalized();
+
+    /// @notice Thrown when attempting to finalize a market that's already been finalized
+    error TrancheMarketAlreadyFinalized();
+
+    /// @notice Thrown when srIn/jrIn ratio doesn't match the market's fixed ratio
+    error TrancheRatioMismatch();
+
+    /// @notice Thrown when attempting to tokenize or redeem with zero amount
+    error TrancheZeroAmount();
+
+    /// @notice Thrown when non-admin attempts to call admin-only functions
+    error OnlyAdmin();
+
+    /// @notice Thrown when a zero address is provided where not allowed
+    error ZeroAddress();
+
+    /// @notice Thrown when matureAt is in the past or invalid
+    error TrancheInvalidMatureAt();
+
+    /// @notice Thrown when weight sum doesn't equal ONE or weights are zero
+    error TrancheInvalidWeights();
+
+    /// @notice Thrown when oracle returns invalid (zero or negative) price
+    error OracleInvalidPrice();
+
+    /// @notice Thrown when oracle price data is stale
+    error OracleStalePrice();
+
+    /// @notice Thrown when oracle price deviates too much from reference price
+    error OraclePriceDeviationExceeded();
+
+    /// @notice Thrown when deviation threshold is invalid (> 100%)
+    error OracleInvalidDeviationThreshold();
+
+    /// @notice Thrown when liquidation is attempted on a market with liquidation disabled
+    error LiquidationNotEnabled();
+
+    /// @notice Thrown when liquidation conditions are not met (price above threshold)
+    error LiquidationConditionNotMet();
+
+    /// @notice Thrown when liquidation is attempted after market maturity
+    error LiquidationAfterMatureAt();
+
+    /// @notice Thrown when liquidation buffer exceeds maximum allowed (2.5%)
+    error LiquidationInvalidBuffer();
+
+    /// @notice Thrown when liquidation reward exceeds maximum allowed (2.5%)
+    error LiquidationInvalidReward();
+
     // ============ Core Functions ============
 
     /**
@@ -157,7 +212,7 @@ interface ITrancheMarket {
     // ============ View Functions ============
 
     /// @notice Returns the Underlying Asset token address
-    function ua() external view returns (address);
+    function uaToken() external view returns (address);
 
     /// @notice Returns the senior tranche token address
     function srToken() external view returns (address);
@@ -166,7 +221,7 @@ interface ITrancheMarket {
     function jrToken() external view returns (address);
 
     /// @notice Returns the maturity timestamp
-    function expiry() external view returns (uint256);
+    function matureAt() external view returns (uint256);
 
     /// @notice Returns whether the market has been finalized
     function finalized() external view returns (bool);
@@ -208,14 +263,15 @@ interface ITrancheMarket {
      */
     function previewSettlement() external view returns (uint256 srRateUA, uint256 jrRateUA, uint256 oraclePrice);
 
-/// @notice Returns swap parameters for Router in a single call
+    /// @notice Returns swap parameters for Router in a single call
     /// @return uaAddress Underlying Asset token address
     /// @return srAddress Senior tranche token address
     /// @return jrAddress Junior tranche token address
+    /// @return poolFee Uniswap V3 pool fee tier
     function getSwapParameters()
         external
         view
-        returns (address uaAddress, address srAddress, address jrAddress);
+        returns (address uaAddress, address srAddress, address jrAddress, uint24 poolFee);
 
     /**
      * @notice Preview the amounts of senior and junior tokens that would be minted for a given UA input

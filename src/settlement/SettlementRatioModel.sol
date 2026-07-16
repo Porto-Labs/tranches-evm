@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import { PortoMath } from "../libraries/math/PortoMath.sol";
-import { Errors } from "../errors/Errors.sol";
+import { FixedPointMathLib } from "solady/utils/FixedPointMathLib.sol";
 
 /**
  * @title SettlementRatioModel
@@ -15,7 +14,19 @@ import { Errors } from "../errors/Errors.sol";
  *      All values use 18 decimal precision (1e18 = 1.0)
  */
 library SettlementRatioModel {
-    using PortoMath for uint256;
+    using FixedPointMathLib for uint256;
+
+    /// @notice Thrown when settlement price is zero
+    error SettlementZeroPrice();
+
+    /// @notice Thrown when settlement quantity is zero
+    error SettlementZeroQuantity();
+
+    /// @notice Thrown when settlement ratio is invalid
+    error SettlementInvalidRatio();
+
+    /// @notice Thrown when yield range is invalid (floor exceeds target)
+    error SettlementInvalidYieldRange();
 
     /**
      * @notice Input parameters for settlement calculation
@@ -52,38 +63,26 @@ library SettlementRatioModel {
      * @param params Settlement parameters
      * @return result Settlement result with redemption rates
      */
-    function calculateSettlement(
-        SettlementParams memory params
-    ) internal pure returns (SettlementResult memory result) {
+    function calculateSettlement(SettlementParams memory params)
+        internal
+        pure
+        returns (SettlementResult memory result)
+    {
         _validateParams(params);
 
-        (uint256 srPrincipalUsd, uint256 jrPrincipalUsd) = _calculatePrincipals(
-            params.uaQuantity,
-            params.initialPrice,
-            params.seniorRatio
-        );
+        (uint256 srPrincipalUsd, uint256 jrPrincipalUsd) =
+            _calculatePrincipals(params.uaQuantity, params.initialPrice, params.seniorRatio);
 
-        (uint256 srFloorUsd, uint256 srTargetUsd) = _calculateThresholds(
-            srPrincipalUsd,
-            params.seniorFloor,
-            params.seniorTarget
-        );
+        (uint256 srFloorUsd, uint256 srTargetUsd) =
+            _calculateThresholds(srPrincipalUsd, params.seniorFloor, params.seniorTarget);
 
-        uint256 totalValueUsd = params.uaQuantity.mulDown(params.maturityPrice);
+        uint256 totalValueUsd = params.uaQuantity.mulWad(params.maturityPrice);
 
-        (uint256 seniorPayoutUsd, uint256 juniorPayoutUsd) = _calculatePayouts(
-            totalValueUsd,
-            jrPrincipalUsd,
-            srFloorUsd,
-            srTargetUsd
-        );
+        (uint256 seniorPayoutUsd, uint256 juniorPayoutUsd) =
+            _calculatePayouts(totalValueUsd, jrPrincipalUsd, srFloorUsd, srTargetUsd);
 
         (result.srRateUA, result.jrRateUA) = _calculateRates(
-            seniorPayoutUsd,
-            juniorPayoutUsd,
-            params.maturityPrice,
-            params.uaQuantity,
-            params.seniorRatio
+            seniorPayoutUsd, juniorPayoutUsd, params.maturityPrice, params.uaQuantity, params.seniorRatio
         );
     }
 
@@ -96,13 +95,13 @@ library SettlementRatioModel {
      * @return srPrincipalUsd Senior principal in USD
      * @return jrPrincipalUsd Junior principal in USD
      */
-    function _calculatePrincipals(
-        uint256 uaQuantity,
-        uint256 initialPrice,
-        uint256 seniorRatio
-    ) internal pure returns (uint256 srPrincipalUsd, uint256 jrPrincipalUsd) {
-        uint256 totalValue = uaQuantity.mulDown(initialPrice);
-        srPrincipalUsd = totalValue.mulUp(seniorRatio);
+    function _calculatePrincipals(uint256 uaQuantity, uint256 initialPrice, uint256 seniorRatio)
+        internal
+        pure
+        returns (uint256 srPrincipalUsd, uint256 jrPrincipalUsd)
+    {
+        uint256 totalValue = uaQuantity.mulWad(initialPrice);
+        srPrincipalUsd = totalValue.mulWadUp(seniorRatio);
         jrPrincipalUsd = totalValue - srPrincipalUsd;
     }
 
@@ -117,13 +116,13 @@ library SettlementRatioModel {
      * @return srFloorUsd Senior floor value in USD (minimum guaranteed)
      * @return srTargetUsd Senior target value in USD (maximum cap)
      */
-    function _calculateThresholds(
-        uint256 srPrincipalUsd,
-        uint256 seniorFloor,
-        uint256 seniorTarget
-    ) internal pure returns (uint256 srFloorUsd, uint256 srTargetUsd) {
-        srFloorUsd = srPrincipalUsd.mulUp(ONE + seniorFloor);
-        srTargetUsd = srPrincipalUsd.mulUp(ONE + seniorTarget);
+    function _calculateThresholds(uint256 srPrincipalUsd, uint256 seniorFloor, uint256 seniorTarget)
+        internal
+        pure
+        returns (uint256 srFloorUsd, uint256 srTargetUsd)
+    {
+        srFloorUsd = srPrincipalUsd.mulWadUp(ONE + seniorFloor);
+        srTargetUsd = srPrincipalUsd.mulWadUp(ONE + seniorTarget);
     }
 
     /**
@@ -135,23 +134,22 @@ library SettlementRatioModel {
      * @return seniorPayout Senior payout in USD
      * @return juniorPayout Junior payout in USD
      */
-    function _calculatePayouts(
-        uint256 totalValueUsd,
-        uint256 jrPrincipalUsd,
-        uint256 srFloorUsd,
-        uint256 srTargetUsd
-    ) internal pure returns (uint256 seniorPayout, uint256 juniorPayout) {
+    function _calculatePayouts(uint256 totalValueUsd, uint256 jrPrincipalUsd, uint256 srFloorUsd, uint256 srTargetUsd)
+        internal
+        pure
+        returns (uint256 seniorPayout, uint256 juniorPayout)
+    {
         // Condition A: Surplus
         if (totalValueUsd >= srTargetUsd + jrPrincipalUsd) {
             seniorPayout = srTargetUsd;
             juniorPayout = totalValueUsd - srTargetUsd;
             // Condition B: Target APY Compression
         } else if (totalValueUsd >= srFloorUsd + jrPrincipalUsd) {
-            seniorPayout = totalValueUsd - jrPrincipalUsd;
-            juniorPayout = jrPrincipalUsd;
+            seniorPayout = srFloorUsd;
+            juniorPayout = totalValueUsd - srFloorUsd;
             // Condition C: Junior Erosion
         } else {
-            seniorPayout = PortoMath.min(totalValueUsd, srFloorUsd);
+            seniorPayout = FixedPointMathLib.min(totalValueUsd, srFloorUsd);
             juniorPayout = totalValueUsd > seniorPayout ? totalValueUsd - seniorPayout : 0;
         }
     }
@@ -175,23 +173,23 @@ library SettlementRatioModel {
         uint256 uaQuantity,
         uint256 seniorRatio
     ) internal pure returns (uint256 srRateUA, uint256 jrRateUA) {
-        uint256 srSupply = uaQuantity.mulDown(seniorRatio);
+        uint256 srSupply = uaQuantity.mulWad(seniorRatio);
         uint256 jrSupply = uaQuantity - srSupply;
 
-        uint256 totalUaAvailable = (seniorPayoutUsd + juniorPayoutUsd).divDown(maturityPrice);
+        uint256 totalUaAvailable = (seniorPayoutUsd + juniorPayoutUsd).divWad(maturityPrice);
 
-        uint256 srPayoutUA = seniorPayoutUsd.divUp(maturityPrice);
-        srRateUA = srSupply > 0 ? srPayoutUA.divUp(srSupply) : 0;
+        uint256 srPayoutUA = seniorPayoutUsd.divWadUp(maturityPrice);
+        srRateUA = srSupply > 0 ? srPayoutUA.divWadUp(srSupply) : 0;
 
-        uint256 srWillReceive = srSupply.mulDown(srRateUA);
+        uint256 srWillReceive = srSupply.mulWad(srRateUA);
 
         if (srWillReceive > totalUaAvailable) {
             srWillReceive = totalUaAvailable;
-            srRateUA = srSupply > 0 ? totalUaAvailable.divDown(srSupply) : 0;
+            srRateUA = srSupply > 0 ? totalUaAvailable.divWad(srSupply) : 0;
         }
 
         uint256 jrWillReceive = totalUaAvailable - srWillReceive;
-        jrRateUA = jrSupply > 0 ? jrWillReceive.divDown(jrSupply) : 0;
+        jrRateUA = jrSupply > 0 ? jrWillReceive.divWad(jrSupply) : 0;
     }
 
     /**
@@ -200,16 +198,16 @@ library SettlementRatioModel {
      */
     function _validateParams(SettlementParams memory params) internal pure {
         if (params.maturityPrice == 0 || params.initialPrice == 0) {
-            revert Errors.SettlementZeroPrice();
+            revert SettlementZeroPrice();
         }
         if (params.uaQuantity == 0) {
-            revert Errors.SettlementZeroQuantity();
+            revert SettlementZeroQuantity();
         }
         if (params.seniorRatio == 0 || params.seniorRatio >= ONE) {
-            revert Errors.SettlementInvalidRatio();
+            revert SettlementInvalidRatio();
         }
         if (params.seniorFloor > params.seniorTarget) {
-            revert Errors.SettlementInvalidYieldRange();
+            revert SettlementInvalidYieldRange();
         }
     }
 }
